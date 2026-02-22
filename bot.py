@@ -15,17 +15,17 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # --- ⚙️ CONFIGURATION (SAFE VERSION) ---
-# Yahan humne default values wapas daal di hain taaki code crash na ho
+# Yeh code ko crash hone se bachayega
 try:
     API_ID = int(os.environ.get("API_ID", "0"))
-except ValueError:
-    logging.error("API_ID environment variable is not a valid integer. Exiting.")
+except (ValueError, TypeError):
+    logging.error("FATAL: API_ID is not a valid integer. Please check your environment variables.")
     exit(1)
-    
-API_HASH = os.environ.get("API_HASH", "")
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-PUBLIC_URL = os.environ.get("PUBLIC_URL", None) # Isko None rakhenge taaki hum check kar sakein
-WEB_APP_URL = os.environ.get("WEB_APP_URL", None) # Isko bhi None rakhenge
+
+API_HASH = os.environ.get("API_HASH")
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+PUBLIC_URL = os.environ.get("PUBLIC_URL")
+WEB_APP_URL = os.environ.get("WEB_APP_URL")
 PORT = int(os.environ.get("PORT", 8080))
 HOST = "0.0.0.0"
 
@@ -99,13 +99,31 @@ async def start(client, message):
 
 @app.on_message(filters.private & (filters.video | filters.document | filters.audio))
 async def media_handler(client, message):
-    # Yeh hai humara "Bulletproof" check
-    if not PUBLIC_URL or not WEB_APP_URL:
+    # =================================================================
+    # === YEH HAI NAYA, SMART CHECK WALA CODE ===
+    # =================================================================
+    error_message = ""
+    # Check 1: Kya PUBLIC_URL sahi hai?
+    if not PUBLIC_URL or not PUBLIC_URL.startswith("http"):
+        error_message += f"🔴 **PUBLIC_URL Galat Hai!**\n\n"
+        error_message += f"**Current Value:** `{PUBLIC_URL}`\n"
+        error_message += f"**Sahi Value Aisi Honi Chahiye:** `https://your-bot-name.onrender.com`\n\n"
+
+    # Check 2: Kya WEB_APP_URL sahi hai?
+    if not WEB_APP_URL:
+        error_message += f"🔴 **WEB_APP_URL Set Nahi Hai!**\n\n"
+        error_message += f"**Current Value:** `{WEB_APP_URL}`\n"
+        error_message += f"**Sahi Value Aisi Honi Chahiye:** `myvideoplayer://play`"
+
+    # Agar koi bhi error mila, toh user ko batao aur ruk jao
+    if error_message:
         return await message.reply_text(
-            "🔴 **CONFIGURATION ERROR!**\n\n"
-            "Admin, please set both `PUBLIC_URL` and `WEB_APP_URL` in your Render Environment Variables."
+            "**CONFIGURATION ERROR!**\n\n"
+            "Admin, please fix these issues in your Render Environment Variables:\n\n"
+            f"----------------------------------------\n{error_message}"
         )
-    
+    # =================================================================
+
     try:
         chat_id = message.chat.id
         msg_id = message.id
@@ -119,19 +137,22 @@ async def media_handler(client, message):
         app_deep_link = f"{WEB_APP_URL}?url={urllib.parse.quote(stream_link)}"
 
         await message.reply_text(
-            f"✅ **Ready to Watch!**\n\n"
-            f"📂 `{file_name}`\n\n"
-            "Click the button below to play in your app!",
+            f"✅ **Link Generated!**\n\n"
+            f"📂 `{file_name}`",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("▶️ Watch in App", url=app_deep_link)]
             ])
         )
     except Exception as e:
         logger.error(f"Error in media_handler: {e}")
-        await message.reply_text("😥 Oops! Something went wrong while generating the link.")
+        await message.reply_text("😥 Oops! Something unexpected went wrong. Please check logs.")
 
 # --- RUNNER ---
 async def start_services():
+    if not all([API_ID, API_HASH, BOT_TOKEN]):
+        logger.error("FATAL: Essential environment variables (API_ID, API_HASH, BOT_TOKEN) are missing. Exiting.")
+        return
+
     app_runner = web.AppRunner(web.Application(client_max_size=1024**3))
     app_runner.app.add_routes(routes)
     await app_runner.setup()
@@ -145,13 +166,7 @@ async def start_services():
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    if not all([API_ID, API_HASH, BOT_TOKEN]):
-        logger.error("One or more essential environment variables (API_ID, API_HASH, BOT_TOKEN) are missing. Exiting.")
-        exit(1)
-    
     try:
         loop.run_until_complete(start_services())
-    except KeyboardInterrupt:
-        pass
     except Exception as e:
-        logger.error(f"FATAL CRASH: {e}")
+        logger.error(f"FATAL CRASH on startup: {e}")
