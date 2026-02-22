@@ -14,11 +14,11 @@ except RuntimeError:
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- ⚙️ CONFIGURATION (SAFE VERSION) ---
+# --- ⚙️ CONFIGURATION ---
 try:
     API_ID = int(os.environ.get("API_ID", "0"))
 except (ValueError, TypeError):
-    logging.error("FATAL: API_ID is not a valid integer. Please check your environment variables.")
+    logging.error("FATAL: API_ID is not a valid integer.")
     exit(1)
 
 API_HASH = os.environ.get("API_HASH")
@@ -50,6 +50,7 @@ routes = web.RouteTableDef()
 async def status_check(request):
     return web.Response(text="✅ Bot & Server Online!")
 
+# 1. STREAMING ROUTE (Yahan se video play hoga)
 @routes.get("/stream/{chat_id}/{message_id}")
 async def stream_handler(request):
     try:
@@ -89,6 +90,49 @@ async def stream_handler(request):
         logger.error(f"Handler Error: {e}")
         return web.Response(status=500, text="Server Error")
 
+# =================================================================
+# 2. REDIRECT ROUTE (Yeh hai Terabox wala Magic Page!)
+# =================================================================
+@routes.get("/watch/{chat_id}/{message_id}")
+async def watch_redirect(request):
+    chat_id = request.match_info['chat_id']
+    message_id = request.match_info['message_id']
+    
+    # Asli video ka link
+    stream_link = f"{PUBLIC_URL}/stream/{chat_id}/{message_id}"
+    
+    # App kholne ka link
+    app_deep_link = f"{WEB_APP_URL}?url={urllib.parse.quote(stream_link)}"
+    
+    # Ek chhota sa HTML page jo turant App khol dega
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Opening App...</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            body {{ font-family: Arial, sans-serif; text-align: center; padding-top: 50px; background-color: #121212; color: white; }}
+            .loader {{ border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }}
+            @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
+            a {{ color: #3498db; text-decoration: none; padding: 10px 20px; border: 1px solid #3498db; border-radius: 5px; display: inline-block; margin-top: 20px; }}
+        </style>
+    </head>
+    <body>
+        <h2>Opening in DiskPlayer App...</h2>
+        <div class="loader"></div>
+        <p>If the app does not open automatically, click below:</p>
+        <a href="{app_deep_link}">Open App Manually</a>
+        
+        <script>
+            // Yeh JavaScript turant aapka Android App open kar degi
+            window.location.href = "{app_deep_link}";
+        </script>
+    </body>
+    </html>
+    """
+    return web.Response(text=html_content, content_type='text/html')
+
 # --- BOT COMMANDS ---
 @app.on_message(filters.command("start"))
 async def start(client, message):
@@ -98,30 +142,9 @@ async def start(client, message):
 
 @app.on_message(filters.private & (filters.video | filters.document | filters.audio))
 async def media_handler(client, message):
-    # =================================================================
-    # === FINAL, SUPER-SMART CHECK ===
-    # =================================================================
-    error_message = ""
-    # Check 1: Kya PUBLIC_URL set hai aur sahi format mein hai?
-    if not PUBLIC_URL or not PUBLIC_URL.startswith("http"):
-        error_message += f"🔴 **PUBLIC_URL Galat Hai!**\n\n"
-        error_message += f"**Aapki Value:** `{PUBLIC_URL}`\n"
-        error_message += f"**Sahi Value Aisi Honi Chahiye:** `https://diskplayerbot.onrender.com`\n\n"
-
-    # Check 2: Kya WEB_APP_URL set hai aur sahi format mein hai?
-    if not WEB_APP_URL or "://" not in WEB_APP_URL:
-        error_message += f"🔴 **WEB_APP_URL Galat Hai!**\n\n"
-        error_message += f"**Aapki Value:** `{WEB_APP_URL}`\n"
-        error_message += f"**Sahi Value Aisi Honi Chahiye:** `myvideoplayer://play`"
-
-    # Agar koi bhi error mila, toh user ko batao aur ruk jao
-    if error_message:
-        return await message.reply_text(
-            "**CONFIGURATION ERROR!**\n\n"
-            "Admin, please fix these issues in your Render Environment Variables:\n\n"
-            f"----------------------------------------\n{error_message}"
-        )
-    # =================================================================
+    # Configuration check
+    if not PUBLIC_URL or not WEB_APP_URL:
+        return await message.reply_text("🔴 ERROR: PUBLIC_URL or WEB_APP_URL is missing in Render Settings.")
 
     try:
         chat_id = message.chat.id
@@ -129,29 +152,26 @@ async def media_handler(client, message):
         media = message.video or message.document or message.audio
         
         if not media: return
-
-        file_name = getattr(media, "file_name", "file") or "file"
+        file_name = getattr(media, "file_name", "video") or "video"
         
-        stream_link = f"{PUBLIC_URL}/stream/{chat_id}/{msg_id}"
-        app_deep_link = f"{WEB_APP_URL}?url={urllib.parse.quote(stream_link)}"
+        # Yahan hum Terabox ki tarah "Redirect Webpage" ka link de rahe hain (Telegram ko yeh pasand hai)
+        watch_link = f"{PUBLIC_URL}/watch/{chat_id}/{msg_id}"
 
         await message.reply_text(
-            f"✅ **Link Generated!**\n\n"
-            f"📂 `{file_name}`",
+            f"✅ **Ready to Watch!**\n\n"
+            f"📂 `{file_name}`\n\n"
+            f"Click the button below to play in app!",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("▶️ Watch in App", url=app_deep_link)]
+                # Ab yahan watch_link (https://...) hai, isliye error nahi aayega!
+                [InlineKeyboardButton("▶️ Watch in App", url=watch_link)]
             ])
         )
     except Exception as e:
-        logger.error(f"Error in media_handler: {e}")
-        await message.reply_text("😥 Oops! Something unexpected went wrong. Please check logs.")
+        logger.error(f"Error: {e}")
+        await message.reply_text(f"😥 Error: {e}")
 
 # --- RUNNER ---
 async def start_services():
-    if not all([API_ID, API_HASH, BOT_TOKEN]):
-        logger.error("FATAL: Essential environment variables (API_ID, API_HASH, BOT_TOKEN) are missing. Exiting.")
-        return
-
     app_runner = web.AppRunner(web.Application(client_max_size=1024**3))
     app_runner.app.add_routes(routes)
     await app_runner.setup()
@@ -161,11 +181,7 @@ async def start_services():
 
     await app.start()
     logger.info("✅ Telegram Bot Started")
-    
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    try:
-        loop.run_until_complete(start_services())
-    except Exception as e:
-        logger.error(f"FATAL CRASH on startup: {e}")
+    loop.run_until_complete(start_services())
