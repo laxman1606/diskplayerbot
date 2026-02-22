@@ -93,6 +93,13 @@ async def start(client, message):
 
 @app.on_message(filters.private & (filters.video | filters.document | filters.audio))
 async def media_handler(client, message):
+    # Sabse pehle check karein ki admin ne variables set kiye hain ya nahi
+    if not PUBLIC_URL or not WEB_APP_URL:
+        return await message.reply_text(
+            "🔴 **ERROR:** Admin ne `PUBLIC_URL` ya `WEB_APP_URL` set nahi kiya hai.\n"
+            "Please check Render Environment Variables."
+        )
+    
     try:
         chat_id = message.chat.id
         msg_id = message.id
@@ -104,7 +111,6 @@ async def media_handler(client, message):
         
         stream_link = f"{PUBLIC_URL}/stream/{chat_id}/{msg_id}"
         
-        # Yeh hai behtar tareeka. Ab yeh Render se value lega.
         app_deep_link = f"{WEB_APP_URL}?url={urllib.parse.quote(stream_link)}"
 
         await message.reply_text(
@@ -117,25 +123,4 @@ async def media_handler(client, message):
         )
     except Exception as e:
         logger.error(e)
-
-# --- RUNNER ---
-async def start_services():
-    app_runner = web.AppRunner(web.Application(client_max_size=1024**3))
-    app_runner.app.add_routes(routes)
-    await app_runner.setup()
-    site = web.TCPSite(app_runner, HOST, PORT)
-    await site.start()
-    logger.info(f"✅ Web Server running on Port {PORT}")
-
-    await app.start()
-    logger.info("✅ Telegram Bot Started")
-    
-    await asyncio.Event().wait()
-
-if __name__ == "__main__":
-    try:
-        loop.run_until_complete(start_services())
-    except KeyboardInterrupt:
-        pass
-    except Exception as e:
-        logger.error(f"Crash: {e}")
+        await message.reply_text(f"Oops! Kuch galat ho gaya: {e}")
