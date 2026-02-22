@@ -15,7 +15,6 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # --- ⚙️ CONFIGURATION (SAFE VERSION) ---
-# Yeh code ko crash hone se bachayega
 try:
     API_ID = int(os.environ.get("API_ID", "0"))
 except (ValueError, TypeError):
@@ -100,19 +99,19 @@ async def start(client, message):
 @app.on_message(filters.private & (filters.video | filters.document | filters.audio))
 async def media_handler(client, message):
     # =================================================================
-    # === YEH HAI NAYA, SMART CHECK WALA CODE ===
+    # === FINAL, SUPER-SMART CHECK ===
     # =================================================================
     error_message = ""
-    # Check 1: Kya PUBLIC_URL sahi hai?
+    # Check 1: Kya PUBLIC_URL set hai aur sahi format mein hai?
     if not PUBLIC_URL or not PUBLIC_URL.startswith("http"):
         error_message += f"🔴 **PUBLIC_URL Galat Hai!**\n\n"
-        error_message += f"**Current Value:** `{PUBLIC_URL}`\n"
-        error_message += f"**Sahi Value Aisi Honi Chahiye:** `https://your-bot-name.onrender.com`\n\n"
+        error_message += f"**Aapki Value:** `{PUBLIC_URL}`\n"
+        error_message += f"**Sahi Value Aisi Honi Chahiye:** `https://diskplayerbot.onrender.com`\n\n"
 
-    # Check 2: Kya WEB_APP_URL sahi hai?
-    if not WEB_APP_URL:
-        error_message += f"🔴 **WEB_APP_URL Set Nahi Hai!**\n\n"
-        error_message += f"**Current Value:** `{WEB_APP_URL}`\n"
+    # Check 2: Kya WEB_APP_URL set hai aur sahi format mein hai?
+    if not WEB_APP_URL or "://" not in WEB_APP_URL:
+        error_message += f"🔴 **WEB_APP_URL Galat Hai!**\n\n"
+        error_message += f"**Aapki Value:** `{WEB_APP_URL}`\n"
         error_message += f"**Sahi Value Aisi Honi Chahiye:** `myvideoplayer://play`"
 
     # Agar koi bhi error mila, toh user ko batao aur ruk jao
