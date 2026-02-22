@@ -14,12 +14,18 @@ except RuntimeError:
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- ⚙️ CONFIGURATION ---
-API_ID = int(os.environ.get("API_ID", "0")) 
+# --- ⚙️ CONFIGURATION (SAFE VERSION) ---
+# Yahan humne default values wapas daal di hain taaki code crash na ho
+try:
+    API_ID = int(os.environ.get("API_ID", "0"))
+except ValueError:
+    logging.error("API_ID environment variable is not a valid integer. Exiting.")
+    exit(1)
+    
 API_HASH = os.environ.get("API_HASH", "")
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
-PUBLIC_URL = os.environ.get("PUBLIC_URL") # Default value hata di
-WEB_APP_URL = os.environ.get("WEB_APP_URL") # Default value hata di
+PUBLIC_URL = os.environ.get("PUBLIC_URL", None) # Isko None rakhenge taaki hum check kar sakein
+WEB_APP_URL = os.environ.get("WEB_APP_URL", None) # Isko bhi None rakhenge
 PORT = int(os.environ.get("PORT", 8080))
 HOST = "0.0.0.0"
 
@@ -93,11 +99,11 @@ async def start(client, message):
 
 @app.on_message(filters.private & (filters.video | filters.document | filters.audio))
 async def media_handler(client, message):
-    # Sabse pehle check karein ki admin ne variables set kiye hain ya nahi
+    # Yeh hai humara "Bulletproof" check
     if not PUBLIC_URL or not WEB_APP_URL:
         return await message.reply_text(
-            "🔴 **ERROR:** Admin ne `PUBLIC_URL` ya `WEB_APP_URL` set nahi kiya hai.\n"
-            "Please check Render Environment Variables."
+            "🔴 **CONFIGURATION ERROR!**\n\n"
+            "Admin, please set both `PUBLIC_URL` and `WEB_APP_URL` in your Render Environment Variables."
         )
     
     try:
@@ -110,17 +116,42 @@ async def media_handler(client, message):
         file_name = getattr(media, "file_name", "file") or "file"
         
         stream_link = f"{PUBLIC_URL}/stream/{chat_id}/{msg_id}"
-        
         app_deep_link = f"{WEB_APP_URL}?url={urllib.parse.quote(stream_link)}"
 
         await message.reply_text(
             f"✅ **Ready to Watch!**\n\n"
             f"📂 `{file_name}`\n\n"
-            "Ab button par click karne se aapka app khulega!",
+            "Click the button below to play in your app!",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("▶️ Watch in App", url=app_deep_link)]
             ])
         )
     except Exception as e:
-        logger.error(e)
-        await message.reply_text(f"Oops! Kuch galat ho gaya: {e}")
+        logger.error(f"Error in media_handler: {e}")
+        await message.reply_text("😥 Oops! Something went wrong while generating the link.")
+
+# --- RUNNER ---
+async def start_services():
+    app_runner = web.AppRunner(web.Application(client_max_size=1024**3))
+    app_runner.app.add_routes(routes)
+    await app_runner.setup()
+    site = web.TCPSite(app_runner, HOST, PORT)
+    await site.start()
+    logger.info(f"✅ Web Server running on Port {PORT}")
+
+    await app.start()
+    logger.info("✅ Telegram Bot Started")
+    
+    await asyncio.Event().wait()
+
+if __name__ == "__main__":
+    if not all([API_ID, API_HASH, BOT_TOKEN]):
+        logger.error("One or more essential environment variables (API_ID, API_HASH, BOT_TOKEN) are missing. Exiting.")
+        exit(1)
+    
+    try:
+        loop.run_until_complete(start_services())
+    except KeyboardInterrupt:
+        pass
+    except Exception as e:
+        logger.error(f"FATAL CRASH: {e}")
