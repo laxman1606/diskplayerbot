@@ -52,7 +52,7 @@ async def status_check(request):
     return web.Response(text="✅ Bot & Server Online!")
 
 # =================================================================
-# 1. BYTE-PERFECT STREAMING ROUTE (Sabse Zaroori Hissa)
+# 1. PRO STREAMING ROUTE (Fixed for ExoPlayer)
 # =================================================================
 @routes.get("/stream/{chat_id}/{message_id}")
 async def stream_handler(request):
@@ -73,52 +73,44 @@ async def stream_handler(request):
         mime_type = getattr(media, "mime_type", "video/mp4") or "video/mp4"
         file_size = getattr(media, "file_size", 0)
 
-        # --- MATH FIX: Kitna Bhejna Hai? ---
-        req_start = 0
-        req_end = file_size - 1
+        # Range Header Logic
+        range_header = request.headers.get('Range', '')
+        start = 0
+        end = file_size - 1
 
-        range_header = request.headers.get('Range')
         if range_header:
             match = re.search(r'bytes=(\d+)-(\d*)', range_header)
             if match:
-                req_start = int(match.group(1))
+                start = int(match.group(1))
                 if match.group(2):
-                    req_end = int(match.group(2))
+                    end = int(match.group(2))
 
-        # Agar exo player ne limit ke bahar manga toh error 416 do
-        if req_start > req_end or req_start >= file_size:
+        if start >= file_size:
             return web.Response(status=416, text="Requested Range Not Satisfiable")
 
-        length = req_end - req_start + 1
+        limit = end - start + 1
 
-        # --- BYTE COUNTER GENERATOR ---
+        # Super stable file generator
         async def file_generator():
             bytes_sent = 0
             try:
-                # App.stream_media se data lena shuru karo
-                async for chunk in app.stream_media(message, offset=req_start, limit=length):
-                    chunk_len = len(chunk)
-                    
-                    # Agar agla chunk bhejkar length limit cross ho rahi hai, toh use kaat do (slice)
-                    if bytes_sent + chunk_len > length:
-                        remaining_bytes = length - bytes_sent
-                        yield chunk[:remaining_bytes]
-                        break # Limit poori, loop band
-                    
+                async for chunk in app.stream_media(message, offset=start, limit=limit):
+                    if bytes_sent + len(chunk) > limit:
+                        chunk = chunk[:limit - bytes_sent]
                     yield chunk
-                    bytes_sent += chunk_len
-                    
+                    bytes_sent += len(chunk)
+                    if bytes_sent >= limit:
+                        break
             except asyncio.CancelledError:
-                pass # Agar user ne video skip/band kiya, toh chupchap stop karo
+                pass
             except Exception as e:
                 logger.error(f"Stream error: {e}")
 
-        # --- HEADERS --- (ExoPlayer ko yahi dekh kar pata chalta hai ki video sahi aayega)
         headers = {
             'Content-Type': mime_type,
             'Accept-Ranges': 'bytes',
-            'Content-Range': f'bytes {req_start}-{req_end}/{file_size}',
-            'Content-Length': str(length),
+            'Content-Range': f'bytes {start}-{end}/{file_size}',
+            'Content-Length': str(limit),
             'Content-Disposition': f'inline; filename="{file_name}"',
             'Access-Control-Allow-Origin': '*'
         }
@@ -135,33 +127,46 @@ async def stream_handler(request):
         return web.Response(status=500, text="Server Error")
 
 # =================================================================
-# 2. REDIRECT ROUTE (Middleman Page)
+# 2. REDIRECT ROUTE (TeraBox Style Webpage)
 # =================================================================
 @routes.get("/watch/{chat_id}/{message_id}")
 async def watch_redirect(request):
     chat_id = request.match_info['chat_id']
     message_id = request.match_info['message_id']
+    
     stream_link = f"{PUBLIC_URL}/stream/{chat_id}/{message_id}"
     app_deep_link = f"{WEB_APP_URL}?url={urllib.parse.quote(stream_link)}"
     
+    # Professional TeraBox style redirect page
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Opening App...</title>
+        <title>DiskWala Player</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-            body {{ font-family: Arial, sans-serif; text-align: center; padding-top: 50px; background-color: #121212; color: white; }}
-            .loader {{ border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }}
+            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; background-color: #121415; color: white; padding-top: 50px; margin: 0; }}
+            .container {{ padding: 20px; }}
+            .logo {{ font-size: 30px; font-weight: bold; color: #0B8A68; margin-bottom: 20px; }}
+            .loader {{ border: 4px solid #1A1D1E; border-top: 4px solid #0B8A68; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 30px auto; }}
             @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-            a {{ color: #3498db; text-decoration: none; padding: 10px 20px; border: 1px solid #3498db; border-radius: 5px; display: inline-block; margin-top: 20px; }}
+            .btn {{ background-color: #0B8A68; color: white; text-decoration: none; padding: 12px 24px; border-radius: 25px; display: inline-block; margin-top: 20px; font-weight: bold; }}
+            p {{ color: #A0A0A0; }}
         </style>
     </head>
     <body>
-        <h2>Opening in DiskPlayer App...</h2>
-        <div class="loader"></div>
-        <a href="{app_deep_link}">Open App Manually</a>
-        <script>window.location.href = "{app_deep_link}";</script>
+        <div class="container">
+            <div class="logo">DiskWala</div>
+            <h2>Redirecting to App...</h2>
+            <div class="loader"></div>
+            <p>If the app doesn't open automatically,<br>please click the button below.</p>
+            <a href="{app_deep_link}" class="btn">Open in DiskWala App</a>
+        </div>
+        <script>
+            setTimeout(function() {{
+                window.location.href = "{app_deep_link}";
+            }}, 500); // 0.5 second delay for smooth transition
+        </script>
     </body>
     </html>
     """
@@ -185,10 +190,18 @@ async def media_handler(client, message):
         if not media: return
         file_name = getattr(media, "file_name", "video") or "video"
         
+        # Asli Web Link jo share kiya ja sakta hai
         watch_link = f"{PUBLIC_URL}/watch/{chat_id}/{msg_id}"
 
+        # === TERABOX STYLE MESSAGE ===
+        text = f"**{file_name}**\n\n"
+        text += f"**Watch Video / Download:**\n"
+        text += f"`{watch_link}`\n\n"
+        text += f"👆 *Click the link above to watch in DiskPlayer app or copy it to share!*"
+
         await message.reply_text(
-            f"✅ **Ready to Watch!**\n\n📂 `{file_name}`\n\nClick below to play in app!",
+            text,
+            disable_web_page_preview=True, # Taki message lamba na ho jaye
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Watch in App", url=watch_link)]])
         )
     except Exception as e:
