@@ -50,7 +50,7 @@ routes = web.RouteTableDef()
 async def status_check(request):
     return web.Response(text="✅ Bot & Server Online!")
 
-# 1. STREAMING ROUTE (Yahan se video play hoga)
+# 1. STREAMING ROUTE (Aapka original working code)
 @routes.get("/stream/{chat_id}/{message_id}")
 async def stream_handler(request):
     try:
@@ -91,20 +91,16 @@ async def stream_handler(request):
         return web.Response(status=500, text="Server Error")
 
 # =================================================================
-# 2. REDIRECT ROUTE (Yeh hai Terabox wala Magic Page!)
+# 2. REDIRECT ROUTE (Terabox wala Magic Page!)
 # =================================================================
 @routes.get("/watch/{chat_id}/{message_id}")
 async def watch_redirect(request):
     chat_id = request.match_info['chat_id']
     message_id = request.match_info['message_id']
     
-    # Asli video ka link
     stream_link = f"{PUBLIC_URL}/stream/{chat_id}/{message_id}"
-    
-    # App kholne ka link
     app_deep_link = f"{WEB_APP_URL}?url={urllib.parse.quote(stream_link)}"
     
-    # Ek chhota sa HTML page jo turant App khol dega
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -125,7 +121,6 @@ async def watch_redirect(request):
         <a href="{app_deep_link}">Open App Manually</a>
         
         <script>
-            // Yeh JavaScript turant aapka Android App open kar degi
             window.location.href = "{app_deep_link}";
         </script>
     </body>
@@ -142,7 +137,6 @@ async def start(client, message):
 
 @app.on_message(filters.private & (filters.video | filters.document | filters.audio))
 async def media_handler(client, message):
-    # Configuration check
     if not PUBLIC_URL or not WEB_APP_URL:
         return await message.reply_text("🔴 ERROR: PUBLIC_URL or WEB_APP_URL is missing in Render Settings.")
 
@@ -154,15 +148,20 @@ async def media_handler(client, message):
         if not media: return
         file_name = getattr(media, "file_name", "video") or "video"
         
-        # Yahan hum Terabox ki tarah "Redirect Webpage" ka link de rahe hain (Telegram ko yeh pasand hai)
         watch_link = f"{PUBLIC_URL}/watch/{chat_id}/{msg_id}"
 
+        # ========================================================
+        # YAHAN BADLAV HAI: TeraBox jaisa Copy karne wala Message
+        # ========================================================
+        text = f"**{file_name}**\n\n"
+        text += f"**Watch Video / Download:**\n"
+        text += f"`{watch_link}`\n\n" # Ye link copy karne ke liye hai
+        text += f"👆 *Click the link above to watch in DiskPlayer app or copy it to share!*"
+
         await message.reply_text(
-            f"✅ **Ready to Watch!**\n\n"
-            f"📂 `{file_name}`\n\n"
-            f"Click the button below to play in app!",
+            text,
+            disable_web_page_preview=True,
             reply_markup=InlineKeyboardMarkup([
-                # Ab yahan watch_link (https://...) hai, isliye error nahi aayega!
                 [InlineKeyboardButton("▶️ Watch in App", url=watch_link)]
             ])
         )
