@@ -20,7 +20,7 @@ try:
     API_ID = int(os.environ.get("API_ID", "0"))
     LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0"))
 except (ValueError, TypeError):
-    logging.error("FATAL: API_ID or LOG_CHANNEL is missing.")
+    logging.error("FATAL: API_ID or LOG_CHANNEL is invalid.")
     exit(1)
 
 API_HASH = os.environ.get("API_HASH")
@@ -45,10 +45,10 @@ routes = web.RouteTableDef()
 
 @routes.get("/")
 async def status_check(request):
-    return web.Response(text="✅ Bot & Server Online! (Pro ExoPlayer Streaming)")
+    return web.Response(text="✅ DiskWala Clone Server is Online!")
 
 # =================================================================
-# 1. FIX: PRO STREAMING ROUTE (ExoPlayer Hang Fix)
+# 1. 🚀 BULLETPROOF STREAMING ROUTE (Chrome & ExoPlayer Supported)
 # =================================================================
 @routes.get("/stream/{chat_id}/{message_id}")
 async def stream_handler(request):
@@ -56,19 +56,27 @@ async def stream_handler(request):
         chat_id = int(request.match_info['chat_id'])
         message_id = int(request.match_info['message_id'])
         
-        message = await user_app.get_messages(chat_id, message_id)
+        # User Engine fetch karega
+        try:
+            message = await user_app.get_messages(chat_id, message_id)
+        except Exception as e:
+            logger.error(f"Failed to get message: {e}")
+            return web.Response(status=404, text=f"Error: User Account couldn't read the Log Channel. Error: {e}")
+
+        if not message or message.empty:
+            return web.Response(status=404, text="Message is empty or deleted.")
+
         media = message.video or message.document or message.audio
-        
         if not media:
-            return web.Response(status=404, text="Media Not Found")
+            return web.Response(status=400, text="No Media Found in this message.")
 
         file_size = getattr(media, "file_size", 0)
         file_name = getattr(media, "file_name", "video.mp4") or "video.mp4"
+        
+        # ⚠️ SABSE BADI PROBLEM KA FIX: Zabardasti MP4 format lagana
         mime_type = getattr(media, "mime_type", "video/mp4") or "video/mp4"
-
-        # 🚀 FIX 1: ExoPlayer ko force karo ki yeh MP4 Video hi hai
-        if "video" not in mime_type:
-            mime_type = "video/mp4"
+        if "video" not in mime_type.lower():
+            mime_type = "video/mp4" # Chrome ko force karo video play karne ke liye
 
         # Range Logic
         range_header = request.headers.get('Range', '')
@@ -85,50 +93,40 @@ async def stream_handler(request):
         if start >= file_size:
             return web.Response(status=416, text="Requested Range Not Satisfiable")
 
-        length = end - start + 1
+        limit = end - start + 1
 
-        response = web.StreamResponse(
-            status=206 if range_header else 200,
-            headers={
-                'Content-Type': mime_type,
-                'Accept-Ranges': 'bytes',
-                'Content-Range': f'bytes {start}-{end}/{file_size}',
-                'Content-Length': str(length),
-                'Content-Disposition': f'inline; filename="{file_name}"',
-                'Access-Control-Allow-Origin': '*',
-                'Cache-Control': 'no-cache' # Render ko cache karne se roko
-            }
+        # NAYA Generator Jo kabi crash nahi hoga
+        async def file_generator():
+            try:
+                async for chunk in user_app.stream_media(message, offset=start, limit=limit):
+                    yield chunk
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Stream error: {e}")
+
+        headers = {
+            'Content-Type': mime_type,
+            'Accept-Ranges': 'bytes',
+            'Content-Range': f'bytes {start}-{end}/{file_size}',
+            'Content-Length': str(limit),
+            'Content-Disposition': f'inline; filename="{file_name}"',
+            'Access-Control-Allow-Origin': '*'
+        }
+
+        status_code = 206 if range_header else 200
+
+        return web.Response(
+            body=file_generator(),
+            headers=headers,
+            status=status_code
         )
-        await response.prepare(request)
-
-        # 🚀 FIX 2: Pyrogram Hang Bug Fix (Manual Chunk Slicing)
-        try:
-            bytes_sent = 0
-            # Notice: limit hata diya hai, ab hum khud loop todेंगे
-            async for chunk in user_app.stream_media(message, offset=start):
-                chunk_len = len(chunk)
-                if bytes_sent + chunk_len > length:
-                    # Sirf utna hi hissa bhejo jitna maanga hai, baaki kaat do
-                    chunk = chunk[:length - bytes_sent]
-                
-                await response.write(chunk)
-                bytes_sent += len(chunk)
-                
-                if bytes_sent >= length:
-                    break # Exact data bhej kar connection cleanly close karo
-                    
-        except asyncio.CancelledError:
-            pass # App band ho gayi, koi baat nahi
-        except Exception as e:
-            logger.error(f"Stream interrupted: {e}")
-
-        return response
     except Exception as e:
         logger.error(f"Handler Error: {e}")
-        return web.Response(status=500, text="Server Error")
+        return web.Response(status=500, text=f"Server Error: {e}")
 
 # =================================================================
-# 2. REDIRECT ROUTE
+# 2. REDIRECT ROUTE (TeraBox Style Webpage)
 # =================================================================
 @routes.get("/watch/{chat_id}/{message_id}")
 async def watch_redirect(request):
@@ -141,11 +139,13 @@ async def watch_redirect(request):
     <!DOCTYPE html>
     <html>
     <head><title>DiskWala Player</title><meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>body {{ font-family: sans-serif; text-align: center; background-color: #121415; color: white; padding-top: 50px; }}
-    .loader {{ border: 4px solid #1A1D1E; border-top: 4px solid #0B8A68; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 30px auto; }}
-    @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-    .btn {{ background-color: #0B8A68; color: white; text-decoration: none; padding: 12px 24px; border-radius: 25px; display: inline-block; margin-top: 20px; font-weight: bold; }}
-    </style></head>
+    <style>
+        body {{ font-family: sans-serif; text-align: center; background-color: #121415; color: white; padding-top: 50px; }}
+        .loader {{ border: 4px solid #1A1D1E; border-top: 4px solid #0B8A68; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 30px auto; }}
+        @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
+        .btn {{ background-color: #0B8A68; color: white; text-decoration: none; padding: 12px 24px; border-radius: 25px; display: inline-block; margin-top: 20px; font-weight: bold; }}
+    </style>
+    </head>
     <body><h2>Redirecting to App...</h2><div class="loader"></div>
     <a href="{app_deep_link}" class="btn">Open in DiskWala App</a>
     <script>setTimeout(function() {{ window.location.href = "{app_deep_link}"; }}, 500);</script>
@@ -161,12 +161,12 @@ async def start(client, message):
 @bot_app.on_message(filters.private & (filters.video | filters.document | filters.audio))
 async def media_handler(client, message):
     if not PUBLIC_URL or not WEB_APP_URL or not STRING_SESSION or LOG_CHANNEL == 0:
-        return await message.reply_text("🔴 ERROR: Configuration is missing.")
+        return await message.reply_text("🔴 ERROR: Settings missing in Render.")
 
     try:
         media = message.video or message.document or message.audio
         if not media: return
-        file_name = getattr(media, "file_name", "video") or "video"
+        file_name = getattr(media, "file_name", "video.mp4") or "video.mp4"
 
         # File ko Log Channel mein bhejo
         copied_msg = await message.copy(chat_id=LOG_CHANNEL)
@@ -181,7 +181,7 @@ async def media_handler(client, message):
         )
     except Exception as e:
         logger.error(f"Error: {e}")
-        await message.reply_text(f"😥 Error: {e}")
+        await message.reply_text(f"😥 Error: Bot ko Log Channel ka Admin banaya hai kya?")
 
 # --- RUNNER ---
 async def start_services():
