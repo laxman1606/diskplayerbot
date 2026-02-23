@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 import urllib.parse
+import re
 from aiohttp import web
 
 # --- 🛠️ LOOP FIX ---
@@ -23,6 +24,7 @@ except (ValueError, TypeError):
 
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
+STRING_SESSION = os.environ.get("STRING_SESSION") # Naya Superpower
 PUBLIC_URL = os.environ.get("PUBLIC_URL")
 WEB_APP_URL = os.environ.get("WEB_APP_URL")
 PORT = int(os.environ.get("PORT", 8080))
@@ -32,15 +34,26 @@ HOST = "0.0.0.0"
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- BOT SETUP ---
+# =================================================================
+# 🚀 TWO ENGINES SETUP (BOT + USER)
+# =================================================================
 if not os.path.exists("sessions"):
     os.makedirs("sessions")
 
-app = Client(
-    "sessions/DiskWala_Render",
+# Engine 1: Bot (Message aur Link banane ke liye)
+bot_app = Client(
+    "sessions/Bot_Engine",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
+)
+
+# Engine 2: User Account (2GB Video Stream karne ke liye)
+user_app = Client(
+    "sessions/User_Engine",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    session_string=STRING_SESSION
 )
 
 # --- WEB SERVER ---
@@ -48,56 +61,79 @@ routes = web.RouteTableDef()
 
 @routes.get("/")
 async def status_check(request):
-    return web.Response(text="✅ Bot & Server Online!")
+    return web.Response(text="✅ Bot & Server Online! (2GB Streaming Enabled)")
 
-# 1. STREAMING ROUTE (Aapka original working code)
+# =================================================================
+# 1. ADVANCED DIRECT STREAMING ROUTE (Yahan USER_APP stream karega)
+# =================================================================
 @routes.get("/stream/{chat_id}/{message_id}")
 async def stream_handler(request):
     try:
         chat_id = int(request.match_info['chat_id'])
         message_id = int(request.match_info['message_id'])
         
-        try:
-            message = await app.get_messages(chat_id, message_id)
-        except Exception:
-            return web.Response(status=404, text="File Not Found")
-
+        # ⚠️ Yahan hum user_app ka use kar rahe hain taaki 2GB limit cross ho sake
+        message = await user_app.get_messages(chat_id, message_id)
         media = message.video or message.document or message.audio
+        
         if not media:
-            return web.Response(status=400, text="No Media Found")
+            return web.Response(status=404, text="Media Not Found")
 
+        file_size = getattr(media, "file_size", 0)
         file_name = getattr(media, "file_name", "video.mp4") or "video.mp4"
         mime_type = getattr(media, "mime_type", "video/mp4") or "video/mp4"
-        file_size = getattr(media, "file_size", 0)
 
-        async def file_generator():
-            try:
-                async for chunk in app.stream_media(message):
-                    yield chunk
-            except Exception as e:
-                logger.error(f"Stream interrupted: {e}")
+        # Range Logic (For ExoPlayer Seeking)
+        range_header = request.headers.get('Range', '')
+        start = 0
+        end = file_size - 1
 
-        return web.Response(
-            body=file_generator(),
+        if range_header:
+            match = re.search(r'bytes=(\d+)-(\d*)', range_header)
+            if match:
+                start = int(match.group(1))
+                if match.group(2):
+                    end = int(match.group(2))
+
+        if start >= file_size:
+            return web.Response(status=416, text="Requested Range Not Satisfiable")
+
+        length = end - start + 1
+
+        response = web.StreamResponse(
+            status=206 if range_header else 200,
             headers={
                 'Content-Type': mime_type,
+                'Accept-Ranges': 'bytes',
+                'Content-Range': f'bytes {start}-{end}/{file_size}',
+                'Content-Length': str(length),
                 'Content-Disposition': f'inline; filename="{file_name}"',
-                'Content-Length': str(file_size),
                 'Access-Control-Allow-Origin': '*'
             }
         )
+        await response.prepare(request)
+
+        try:
+            # ⚠️ User account chunk by chunk video bhej raha hai
+            async for chunk in user_app.stream_media(message, offset=start, limit=length):
+                await response.write(chunk)
+        except asyncio.CancelledError:
+            pass 
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
+
+        return response
     except Exception as e:
         logger.error(f"Handler Error: {e}")
         return web.Response(status=500, text="Server Error")
 
 # =================================================================
-# 2. REDIRECT ROUTE (Terabox wala Magic Page!)
+# 2. REDIRECT ROUTE (TeraBox Style Webpage)
 # =================================================================
 @routes.get("/watch/{chat_id}/{message_id}")
 async def watch_redirect(request):
     chat_id = request.match_info['chat_id']
     message_id = request.match_info['message_id']
-    
     stream_link = f"{PUBLIC_URL}/stream/{chat_id}/{message_id}"
     app_deep_link = f"{WEB_APP_URL}?url={urllib.parse.quote(stream_link)}"
     
@@ -105,81 +141,80 @@ async def watch_redirect(request):
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Opening App...</title>
+        <title>DiskWala Player</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-            body {{ font-family: Arial, sans-serif; text-align: center; padding-top: 50px; background-color: #121212; color: white; }}
-            .loader {{ border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }}
+            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; background-color: #121415; color: white; padding-top: 50px; margin: 0; }}
+            .container {{ padding: 20px; }}
+            .logo {{ font-size: 30px; font-weight: bold; color: #0B8A68; margin-bottom: 20px; }}
+            .loader {{ border: 4px solid #1A1D1E; border-top: 4px solid #0B8A68; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 30px auto; }}
             @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-            a {{ color: #3498db; text-decoration: none; padding: 10px 20px; border: 1px solid #3498db; border-radius: 5px; display: inline-block; margin-top: 20px; }}
+            .btn {{ background-color: #0B8A68; color: white; text-decoration: none; padding: 12px 24px; border-radius: 25px; display: inline-block; margin-top: 20px; font-weight: bold; }}
+            p {{ color: #A0A0A0; }}
         </style>
     </head>
     <body>
-        <h2>Opening in DiskPlayer App...</h2>
-        <div class="loader"></div>
-        <p>If the app does not open automatically, click below:</p>
-        <a href="{app_deep_link}">Open App Manually</a>
-        
-        <script>
-            window.location.href = "{app_deep_link}";
-        </script>
+        <div class="container">
+            <div class="logo">DiskWala</div>
+            <h2>Redirecting to App...</h2>
+            <div class="loader"></div>
+            <p>If the app doesn't open automatically,<br>please click the button below.</p>
+            <a href="{app_deep_link}" class="btn">Open in DiskWala App</a>
+        </div>
+        <script>setTimeout(function() {{ window.location.href = "{app_deep_link}"; }}, 500);</script>
     </body>
     </html>
     """
     return web.Response(text=html_content, content_type='text/html')
 
-# --- BOT COMMANDS ---
-@app.on_message(filters.command("start"))
+# --- BOT COMMANDS (Yahan BOT_APP kaam karega) ---
+@bot_app.on_message(filters.command("start"))
 async def start(client, message):
-    await message.reply_text(
-        f"👋 **Bot Started!**\n\nServer Link: `{PUBLIC_URL}`\nWaiting for files..."
-    )
+    await message.reply_text(f"👋 **Bot Started!**\n\nServer Link: `{PUBLIC_URL}`\nWaiting for files...")
 
-@app.on_message(filters.private & (filters.video | filters.document | filters.audio))
+@bot_app.on_message(filters.private & (filters.video | filters.document | filters.audio))
 async def media_handler(client, message):
-    if not PUBLIC_URL or not WEB_APP_URL:
-        return await message.reply_text("🔴 ERROR: PUBLIC_URL or WEB_APP_URL is missing in Render Settings.")
+    if not PUBLIC_URL or not WEB_APP_URL or not STRING_SESSION:
+        return await message.reply_text("🔴 ERROR: PUBLIC_URL, WEB_APP_URL ya STRING_SESSION missing hai.")
 
     try:
         chat_id = message.chat.id
         msg_id = message.id
         media = message.video or message.document or message.audio
-        
         if not media: return
         file_name = getattr(media, "file_name", "video") or "video"
         
         watch_link = f"{PUBLIC_URL}/watch/{chat_id}/{msg_id}"
-
-        # ========================================================
-        # YAHAN BADLAV HAI: TeraBox jaisa Copy karne wala Message
-        # ========================================================
-        text = f"**{file_name}**\n\n"
-        text += f"**Watch Video / Download:**\n"
-        text += f"`{watch_link}`\n\n" # Ye link copy karne ke liye hai
-        text += f"👆 *Click the link above to watch in DiskPlayer app or copy it to share!*"
+        text = f"**{file_name}**\n\n**Watch Video / Download:**\n`{watch_link}`\n\n👆 *Click the link above to watch in DiskPlayer app or copy it to share!*"
 
         await message.reply_text(
-            text,
-            disable_web_page_preview=True,
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("▶️ Watch in App", url=watch_link)]
-            ])
+            text, disable_web_page_preview=True,
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Watch in App", url=watch_link)]])
         )
     except Exception as e:
         logger.error(f"Error: {e}")
-        await message.reply_text(f"😥 Error: {e}")
+        await message.reply_text("😥 Error generating link.")
 
 # --- RUNNER ---
 async def start_services():
+    if not all([API_ID, API_HASH, BOT_TOKEN, STRING_SESSION]):
+        logger.error("FATAL: Essential variables missing. Exiting.")
+        return
+        
     app_runner = web.AppRunner(web.Application(client_max_size=1024**3))
     app_runner.app.add_routes(routes)
     await app_runner.setup()
     site = web.TCPSite(app_runner, HOST, PORT)
     await site.start()
     logger.info(f"✅ Web Server running on Port {PORT}")
-
-    await app.start()
+    
+    # Dono engines ko start karna zaroori hai
+    await bot_app.start()
     logger.info("✅ Telegram Bot Started")
+    
+    await user_app.start()
+    logger.info("✅ User Session Started (2GB Limit Unlocked!)")
+    
     await asyncio.Event().wait()
 
 if __name__ == "__main__":
