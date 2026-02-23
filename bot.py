@@ -2,7 +2,7 @@ import os
 import logging
 import asyncio
 import urllib.parse
-import re # Naya import Range requests ke liye
+import re
 from aiohttp import web
 
 # --- 🛠️ LOOP FIX ---
@@ -52,7 +52,7 @@ async def status_check(request):
     return web.Response(text="✅ Bot & Server Online!")
 
 # =================================================================
-# 1. ADVANCE STREAMING ROUTE (Yahan EXOPlayer ke liye Range Support add kiya hai)
+# 1. BYTE-PERFECT STREAMING ROUTE (Sabse Zaroori Hissa)
 # =================================================================
 @routes.get("/stream/{chat_id}/{message_id}")
 async def stream_handler(request):
@@ -73,40 +73,56 @@ async def stream_handler(request):
         mime_type = getattr(media, "mime_type", "video/mp4") or "video/mp4"
         file_size = getattr(media, "file_size", 0)
 
-        # --- RANGE REQUEST LOGIC (EXOPLAYER KE LIYE) ---
-        range_header = request.headers.get('Range', '')
-        offset = 0
-        limit = file_size
+        # --- MATH FIX: Kitna Bhejna Hai? ---
+        req_start = 0
+        req_end = file_size - 1
 
+        range_header = request.headers.get('Range')
         if range_header:
             match = re.search(r'bytes=(\d+)-(\d*)', range_header)
             if match:
-                offset = int(match.group(1))
-                end = int(match.group(2)) if match.group(2) else file_size - 1
-                limit = (end - offset) + 1
+                req_start = int(match.group(1))
+                if match.group(2):
+                    req_end = int(match.group(2))
 
+        # Agar exo player ne limit ke bahar manga toh error 416 do
+        if req_start > req_end or req_start >= file_size:
+            return web.Response(status=416, text="Requested Range Not Satisfiable")
+
+        length = req_end - req_start + 1
+
+        # --- BYTE COUNTER GENERATOR ---
         async def file_generator():
+            bytes_sent = 0
             try:
-                # Ab bot sirf wahi hissa bhejega jo ExoPlayer maangega
-                async for chunk in app.stream_media(message, offset=offset, limit=limit):
+                # App.stream_media se data lena shuru karo
+                async for chunk in app.stream_media(message, offset=req_start, limit=length):
+                    chunk_len = len(chunk)
+                    
+                    # Agar agla chunk bhejkar length limit cross ho rahi hai, toh use kaat do (slice)
+                    if bytes_sent + chunk_len > length:
+                        remaining_bytes = length - bytes_sent
+                        yield chunk[:remaining_bytes]
+                        break # Limit poori, loop band
+                    
                     yield chunk
+                    bytes_sent += chunk_len
+                    
             except asyncio.CancelledError:
-                # Agar user ne video skip kiya ya band kiya, toh error mat do
-                pass
+                pass # Agar user ne video skip/band kiya, toh chupchap stop karo
             except Exception as e:
-                logger.error(f"Stream interrupted: {e}")
+                logger.error(f"Stream error: {e}")
 
-        # Response headers setup karna bahut zaroori hai
+        # --- HEADERS --- (ExoPlayer ko yahi dekh kar pata chalta hai ki video sahi aayega)
         headers = {
             'Content-Type': mime_type,
             'Accept-Ranges': 'bytes',
-            'Content-Length': str(limit),
-            'Content-Range': f'bytes {offset}-{offset + limit - 1}/{file_size}',
+            'Content-Range': f'bytes {req_start}-{req_end}/{file_size}',
+            'Content-Length': str(length),
             'Content-Disposition': f'inline; filename="{file_name}"',
             'Access-Control-Allow-Origin': '*'
         }
 
-        # 206 Partial Content ka matlab hai ki "Main tumhe video ka ek hissa bhej raha hoon"
         status_code = 206 if range_header else 200
 
         return web.Response(
