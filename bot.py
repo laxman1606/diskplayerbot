@@ -52,7 +52,7 @@ async def status_check(request):
     return web.Response(text="✅ Bot & Server Online!")
 
 # =================================================================
-# 1. PRO STREAMING ROUTE (Fixed for ExoPlayer)
+# 1. ADVANCED DIRECT STREAMING ROUTE (ExoPlayer ke liye best)
 # =================================================================
 @routes.get("/stream/{chat_id}/{message_id}")
 async def stream_handler(request):
@@ -60,20 +60,17 @@ async def stream_handler(request):
         chat_id = int(request.match_info['chat_id'])
         message_id = int(request.match_info['message_id'])
         
-        try:
-            message = await app.get_messages(chat_id, message_id)
-        except Exception:
-            return web.Response(status=404, text="File Not Found")
-
+        message = await app.get_messages(chat_id, message_id)
         media = message.video or message.document or message.audio
+        
         if not media:
-            return web.Response(status=400, text="No Media Found")
+            return web.Response(status=404, text="Media Not Found")
 
+        file_size = getattr(media, "file_size", 0)
         file_name = getattr(media, "file_name", "video.mp4") or "video.mp4"
         mime_type = getattr(media, "mime_type", "video/mp4") or "video/mp4"
-        file_size = getattr(media, "file_size", 0)
 
-        # Range Header Logic
+        # Range Logic
         range_header = request.headers.get('Range', '')
         start = 0
         end = file_size - 1
@@ -88,40 +85,32 @@ async def stream_handler(request):
         if start >= file_size:
             return web.Response(status=416, text="Requested Range Not Satisfiable")
 
-        limit = end - start + 1
+        length = end - start + 1
 
-        # Super stable file generator
-        async def file_generator():
-            bytes_sent = 0
-            try:
-                async for chunk in app.stream_media(message, offset=start, limit=limit):
-                    if bytes_sent + len(chunk) > limit:
-                        chunk = chunk[:limit - bytes_sent]
-                    yield chunk
-                    bytes_sent += len(chunk)
-                    if bytes_sent >= limit:
-                        break
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logger.error(f"Stream error: {e}")
-
-        headers = {
-            'Content-Type': mime_type,
-            'Accept-Ranges': 'bytes',
-            'Content-Range': f'bytes {start}-{end}/{file_size}',
-            'Content-Length': str(limit),
-            'Content-Disposition': f'inline; filename="{file_name}"',
-            'Access-Control-Allow-Origin': '*'
-        }
-
-        status_code = 206 if range_header else 200
-
-        return web.Response(
-            body=file_generator(),
-            headers=headers,
-            status=status_code
+        # NAYA TAAQATWAR STREAM RESPONSE (Yeh atakne nahi dega)
+        response = web.StreamResponse(
+            status=206 if range_header else 200,
+            headers={
+                'Content-Type': mime_type,
+                'Accept-Ranges': 'bytes',
+                'Content-Range': f'bytes {start}-{end}/{file_size}',
+                'Content-Length': str(length),
+                'Content-Disposition': f'inline; filename="{file_name}"',
+                'Access-Control-Allow-Origin': '*'
+            }
         )
+        await response.prepare(request)
+
+        try:
+            # Direct socket stream
+            async for chunk in app.stream_media(message, offset=start, limit=length):
+                await response.write(chunk)
+        except asyncio.CancelledError:
+            pass # User ne app band kar diya
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
+
+        return response
     except Exception as e:
         logger.error(f"Handler Error: {e}")
         return web.Response(status=500, text="Server Error")
@@ -133,11 +122,9 @@ async def stream_handler(request):
 async def watch_redirect(request):
     chat_id = request.match_info['chat_id']
     message_id = request.match_info['message_id']
-    
     stream_link = f"{PUBLIC_URL}/stream/{chat_id}/{message_id}"
     app_deep_link = f"{WEB_APP_URL}?url={urllib.parse.quote(stream_link)}"
     
-    # Professional TeraBox style redirect page
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -162,11 +149,7 @@ async def watch_redirect(request):
             <p>If the app doesn't open automatically,<br>please click the button below.</p>
             <a href="{app_deep_link}" class="btn">Open in DiskWala App</a>
         </div>
-        <script>
-            setTimeout(function() {{
-                window.location.href = "{app_deep_link}";
-            }}, 500); // 0.5 second delay for smooth transition
-        </script>
+        <script>setTimeout(function() {{ window.location.href = "{app_deep_link}"; }}, 500);</script>
     </body>
     </html>
     """
@@ -186,22 +169,14 @@ async def media_handler(client, message):
         chat_id = message.chat.id
         msg_id = message.id
         media = message.video or message.document or message.audio
-        
         if not media: return
         file_name = getattr(media, "file_name", "video") or "video"
         
-        # Asli Web Link jo share kiya ja sakta hai
         watch_link = f"{PUBLIC_URL}/watch/{chat_id}/{msg_id}"
-
-        # === TERABOX STYLE MESSAGE ===
-        text = f"**{file_name}**\n\n"
-        text += f"**Watch Video / Download:**\n"
-        text += f"`{watch_link}`\n\n"
-        text += f"👆 *Click the link above to watch in DiskPlayer app or copy it to share!*"
+        text = f"**{file_name}**\n\n**Watch Video / Download:**\n`{watch_link}`\n\n👆 *Click the link above to watch in DiskPlayer app or copy it to share!*"
 
         await message.reply_text(
-            text,
-            disable_web_page_preview=True, # Taki message lamba na ho jaye
+            text, disable_web_page_preview=True,
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Watch in App", url=watch_link)]])
         )
     except Exception as e:
@@ -213,14 +188,12 @@ async def start_services():
     if not all([API_ID, API_HASH, BOT_TOKEN]):
         logger.error("FATAL: Essential variables missing. Exiting.")
         return
-
     app_runner = web.AppRunner(web.Application(client_max_size=1024**3))
     app_runner.app.add_routes(routes)
     await app_runner.setup()
     site = web.TCPSite(app_runner, HOST, PORT)
     await site.start()
     logger.info(f"✅ Web Server running on Port {PORT}")
-
     await app.start()
     logger.info("✅ Telegram Bot Started")
     await asyncio.Event().wait()
