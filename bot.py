@@ -18,14 +18,14 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 # --- ⚙️ CONFIGURATION ---
 try:
     API_ID = int(os.environ.get("API_ID", "0"))
-    LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0"))
+    LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0")) # Naya
 except (ValueError, TypeError):
-    logging.error("FATAL: API_ID or LOG_CHANNEL is invalid.")
+    logging.error("FATAL: API_ID or LOG_CHANNEL is not valid.")
     exit(1)
 
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
-STRING_SESSION = os.environ.get("STRING_SESSION")
+STRING_SESSION = os.environ.get("STRING_SESSION") # Naya
 PUBLIC_URL = os.environ.get("PUBLIC_URL")
 WEB_APP_URL = os.environ.get("WEB_APP_URL")
 PORT = int(os.environ.get("PORT", 8080))
@@ -37,7 +37,11 @@ logger = logging.getLogger(__name__)
 if not os.path.exists("sessions"):
     os.makedirs("sessions")
 
-# DUAL ENGINE SETUP
+# =================================================================
+# 🚀 2 ENGINES SETUP (DiskWala Trick)
+# bot_app: Message bhejega.
+# user_app: 2GB ki file stream karega.
+# =================================================================
 bot_app = Client("sessions/Bot_Engine", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 user_app = Client("sessions/User_Engine", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
 
@@ -45,10 +49,10 @@ routes = web.RouteTableDef()
 
 @routes.get("/")
 async def status_check(request):
-    return web.Response(text="✅ DiskWala Clone Server is Online!")
+    return web.Response(text="✅ Bot & Server Online! (2GB Streaming Enabled)")
 
 # =================================================================
-# 1. 🚀 BULLETPROOF STREAMING ROUTE (Chrome & ExoPlayer Supported)
+# 1. ADVANCED STREAMING ROUTE (Yahan User Account kaam karega)
 # =================================================================
 @routes.get("/stream/{chat_id}/{message_id}")
 async def stream_handler(request):
@@ -56,29 +60,22 @@ async def stream_handler(request):
         chat_id = int(request.match_info['chat_id'])
         message_id = int(request.match_info['message_id'])
         
-        # User Engine fetch karega
-        try:
-            message = await user_app.get_messages(chat_id, message_id)
-        except Exception as e:
-            logger.error(f"Failed to get message: {e}")
-            return web.Response(status=404, text=f"Error: User Account couldn't read the Log Channel. Error: {e}")
-
-        if not message or message.empty:
-            return web.Response(status=404, text="Message is empty or deleted.")
-
+        # User account video uthayega taaki 50MB limit na lage
+        message = await user_app.get_messages(chat_id, message_id)
         media = message.video or message.document or message.audio
+        
         if not media:
-            return web.Response(status=400, text="No Media Found in this message.")
+            return web.Response(status=404, text="No Media Found")
 
         file_size = getattr(media, "file_size", 0)
         file_name = getattr(media, "file_name", "video.mp4") or "video.mp4"
-        
-        # ⚠️ SABSE BADI PROBLEM KA FIX: Zabardasti MP4 format lagana
         mime_type = getattr(media, "mime_type", "video/mp4") or "video/mp4"
-        if "video" not in mime_type.lower():
-            mime_type = "video/mp4" # Chrome ko force karo video play karne ke liye
 
-        # Range Logic
+        # Chrome/App ko force karo ki ye Video hi hai
+        if "video" not in mime_type:
+            mime_type = "video/mp4"
+
+        # --- VIDEO KO TUKDO MEIN BHEJNE KA LOGIC (Range Request) ---
         range_header = request.headers.get('Range', '')
         start = 0
         end = file_size - 1
@@ -93,40 +90,45 @@ async def stream_handler(request):
         if start >= file_size:
             return web.Response(status=416, text="Requested Range Not Satisfiable")
 
-        limit = end - start + 1
+        length = end - start + 1
 
-        # NAYA Generator Jo kabi crash nahi hoga
-        async def file_generator():
-            try:
-                async for chunk in user_app.stream_media(message, offset=start, limit=limit):
-                    yield chunk
-            except asyncio.CancelledError:
-                pass
-            except Exception as e:
-                logger.error(f"Stream error: {e}")
-
-        headers = {
-            'Content-Type': mime_type,
-            'Accept-Ranges': 'bytes',
-            'Content-Range': f'bytes {start}-{end}/{file_size}',
-            'Content-Length': str(limit),
-            'Content-Disposition': f'inline; filename="{file_name}"',
-            'Access-Control-Allow-Origin': '*'
-        }
-
-        status_code = 206 if range_header else 200
-
-        return web.Response(
-            body=file_generator(),
-            headers=headers,
-            status=status_code
+        # Professional Stream Response (Ye crash nahi hone dega)
+        response = web.StreamResponse(
+            status=206 if range_header else 200,
+            headers={
+                'Content-Type': mime_type,
+                'Accept-Ranges': 'bytes',
+                'Content-Range': f'bytes {start}-{end}/{file_size}',
+                'Content-Length': str(length),
+                'Content-Disposition': f'inline; filename="{file_name}"',
+                'Access-Control-Allow-Origin': '*'
+            }
         )
+        await response.prepare(request)
+
+        try:
+            bytes_sent = 0
+            async for chunk in user_app.stream_media(message, offset=start):
+                if bytes_sent + len(chunk) > length:
+                    chunk = chunk[:length - bytes_sent]
+                
+                await response.write(chunk)
+                bytes_sent += len(chunk)
+                
+                if bytes_sent >= length:
+                    break
+        except asyncio.CancelledError:
+            pass # App band kiya
+        except Exception as e:
+            logger.error(f"Stream interrupted: {e}")
+
+        return response
     except Exception as e:
         logger.error(f"Handler Error: {e}")
-        return web.Response(status=500, text=f"Server Error: {e}")
+        return web.Response(status=500, text="Server Error")
 
 # =================================================================
-# 2. REDIRECT ROUTE (TeraBox Style Webpage)
+# 2. REDIRECT ROUTE (TeraBox wala Magic Page - Same to same)
 # =================================================================
 @routes.get("/watch/{chat_id}/{message_id}")
 async def watch_redirect(request):
@@ -138,18 +140,24 @@ async def watch_redirect(request):
     html_content = f"""
     <!DOCTYPE html>
     <html>
-    <head><title>DiskWala Player</title><meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body {{ font-family: sans-serif; text-align: center; background-color: #121415; color: white; padding-top: 50px; }}
-        .loader {{ border: 4px solid #1A1D1E; border-top: 4px solid #0B8A68; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 30px auto; }}
-        @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-        .btn {{ background-color: #0B8A68; color: white; text-decoration: none; padding: 12px 24px; border-radius: 25px; display: inline-block; margin-top: 20px; font-weight: bold; }}
-    </style>
+    <head>
+        <title>Opening App...</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            body {{ font-family: Arial, sans-serif; text-align: center; padding-top: 50px; background-color: #121212; color: white; }}
+            .loader {{ border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }}
+            @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
+            a {{ color: #3498db; text-decoration: none; padding: 10px 20px; border: 1px solid #3498db; border-radius: 5px; display: inline-block; margin-top: 20px; }}
+        </style>
     </head>
-    <body><h2>Redirecting to App...</h2><div class="loader"></div>
-    <a href="{app_deep_link}" class="btn">Open in DiskWala App</a>
-    <script>setTimeout(function() {{ window.location.href = "{app_deep_link}"; }}, 500);</script>
-    </body></html>
+    <body>
+        <h2>Opening in DiskPlayer App...</h2>
+        <div class="loader"></div>
+        <p>If the app does not open automatically, click below:</p>
+        <a href="{app_deep_link}">Open App Manually</a>
+        <script>window.location.href = "{app_deep_link}";</script>
+    </body>
+    </html>
     """
     return web.Response(text=html_content, content_type='text/html')
 
@@ -166,14 +174,19 @@ async def media_handler(client, message):
     try:
         media = message.video or message.document or message.audio
         if not media: return
-        file_name = getattr(media, "file_name", "video.mp4") or "video.mp4"
+        file_name = getattr(media, "file_name", "video") or "video"
 
-        # File ko Log Channel mein bhejo
+        # ⚠️ Yahan Bot file ko Log Channel mein copy karega
         copied_msg = await message.copy(chat_id=LOG_CHANNEL)
         
+        # Link ab Log Channel se banega
         watch_link = f"{PUBLIC_URL}/watch/{LOG_CHANNEL}/{copied_msg.id}"
-        
-        text = f"**{file_name}**\n\n**Watch Video / Download:**\n`{watch_link}`\n\n👆 *Click the link above to watch in DiskPlayer app or copy it to share!*"
+
+        # Aapka TeraBox jaisa Copy karne wala Message
+        text = f"**{file_name}**\n\n"
+        text += f"**Watch Video / Download:**\n"
+        text += f"`{watch_link}`\n\n"
+        text += f"👆 *Click the link above to watch in DiskPlayer app or copy it to share!*"
 
         await message.reply_text(
             text, disable_web_page_preview=True,
@@ -181,7 +194,7 @@ async def media_handler(client, message):
         )
     except Exception as e:
         logger.error(f"Error: {e}")
-        await message.reply_text(f"😥 Error: Bot ko Log Channel ka Admin banaya hai kya?")
+        await message.reply_text(f"😥 Error: {e}")
 
 # --- RUNNER ---
 async def start_services():
@@ -191,10 +204,11 @@ async def start_services():
     site = web.TCPSite(app_runner, HOST, PORT)
     await site.start()
     logger.info(f"✅ Web Server running")
-    
+
+    # Dono start honge
     await bot_app.start()
     await user_app.start()
-    logger.info("✅ Bot & User Session Started")
+    logger.info("✅ Telegram Bot & User Engine Started")
     
     await asyncio.Event().wait()
 
