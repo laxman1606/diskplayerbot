@@ -2,6 +2,7 @@ import os
 import logging
 import asyncio
 import urllib.parse
+import re # Naya import Range requests ke liye
 from aiohttp import web
 
 # --- 🛠️ LOOP FIX ---
@@ -50,7 +51,9 @@ routes = web.RouteTableDef()
 async def status_check(request):
     return web.Response(text="✅ Bot & Server Online!")
 
-# 1. STREAMING ROUTE (Yahan se video play hoga)
+# =================================================================
+# 1. ADVANCE STREAMING ROUTE (Yahan EXOPlayer ke liye Range Support add kiya hai)
+# =================================================================
 @routes.get("/stream/{chat_id}/{message_id}")
 async def stream_handler(request):
     try:
@@ -70,41 +73,61 @@ async def stream_handler(request):
         mime_type = getattr(media, "mime_type", "video/mp4") or "video/mp4"
         file_size = getattr(media, "file_size", 0)
 
+        # --- RANGE REQUEST LOGIC (EXOPLAYER KE LIYE) ---
+        range_header = request.headers.get('Range', '')
+        offset = 0
+        limit = file_size
+
+        if range_header:
+            match = re.search(r'bytes=(\d+)-(\d*)', range_header)
+            if match:
+                offset = int(match.group(1))
+                end = int(match.group(2)) if match.group(2) else file_size - 1
+                limit = (end - offset) + 1
+
         async def file_generator():
             try:
-                async for chunk in app.stream_media(message):
+                # Ab bot sirf wahi hissa bhejega jo ExoPlayer maangega
+                async for chunk in app.stream_media(message, offset=offset, limit=limit):
                     yield chunk
+            except asyncio.CancelledError:
+                # Agar user ne video skip kiya ya band kiya, toh error mat do
+                pass
             except Exception as e:
                 logger.error(f"Stream interrupted: {e}")
 
+        # Response headers setup karna bahut zaroori hai
+        headers = {
+            'Content-Type': mime_type,
+            'Accept-Ranges': 'bytes',
+            'Content-Length': str(limit),
+            'Content-Range': f'bytes {offset}-{offset + limit - 1}/{file_size}',
+            'Content-Disposition': f'inline; filename="{file_name}"',
+            'Access-Control-Allow-Origin': '*'
+        }
+
+        # 206 Partial Content ka matlab hai ki "Main tumhe video ka ek hissa bhej raha hoon"
+        status_code = 206 if range_header else 200
+
         return web.Response(
             body=file_generator(),
-            headers={
-                'Content-Type': mime_type,
-                'Content-Disposition': f'inline; filename="{file_name}"',
-                'Content-Length': str(file_size),
-                'Access-Control-Allow-Origin': '*'
-            }
+            headers=headers,
+            status=status_code
         )
     except Exception as e:
         logger.error(f"Handler Error: {e}")
         return web.Response(status=500, text="Server Error")
 
 # =================================================================
-# 2. REDIRECT ROUTE (Yeh hai Terabox wala Magic Page!)
+# 2. REDIRECT ROUTE (Middleman Page)
 # =================================================================
 @routes.get("/watch/{chat_id}/{message_id}")
 async def watch_redirect(request):
     chat_id = request.match_info['chat_id']
     message_id = request.match_info['message_id']
-    
-    # Asli video ka link
     stream_link = f"{PUBLIC_URL}/stream/{chat_id}/{message_id}"
-    
-    # App kholne ka link
     app_deep_link = f"{WEB_APP_URL}?url={urllib.parse.quote(stream_link)}"
     
-    # Ek chhota sa HTML page jo turant App khol dega
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -121,13 +144,8 @@ async def watch_redirect(request):
     <body>
         <h2>Opening in DiskPlayer App...</h2>
         <div class="loader"></div>
-        <p>If the app does not open automatically, click below:</p>
         <a href="{app_deep_link}">Open App Manually</a>
-        
-        <script>
-            // Yeh JavaScript turant aapka Android App open kar degi
-            window.location.href = "{app_deep_link}";
-        </script>
+        <script>window.location.href = "{app_deep_link}";</script>
     </body>
     </html>
     """
@@ -136,13 +154,10 @@ async def watch_redirect(request):
 # --- BOT COMMANDS ---
 @app.on_message(filters.command("start"))
 async def start(client, message):
-    await message.reply_text(
-        f"👋 **Bot Started!**\n\nServer Link: `{PUBLIC_URL}`\nWaiting for files..."
-    )
+    await message.reply_text(f"👋 **Bot Started!**\n\nServer Link: `{PUBLIC_URL}`\nWaiting for files...")
 
 @app.on_message(filters.private & (filters.video | filters.document | filters.audio))
 async def media_handler(client, message):
-    # Configuration check
     if not PUBLIC_URL or not WEB_APP_URL:
         return await message.reply_text("🔴 ERROR: PUBLIC_URL or WEB_APP_URL is missing in Render Settings.")
 
@@ -154,24 +169,22 @@ async def media_handler(client, message):
         if not media: return
         file_name = getattr(media, "file_name", "video") or "video"
         
-        # Yahan hum Terabox ki tarah "Redirect Webpage" ka link de rahe hain (Telegram ko yeh pasand hai)
         watch_link = f"{PUBLIC_URL}/watch/{chat_id}/{msg_id}"
 
         await message.reply_text(
-            f"✅ **Ready to Watch!**\n\n"
-            f"📂 `{file_name}`\n\n"
-            f"Click the button below to play in app!",
-            reply_markup=InlineKeyboardMarkup([
-                # Ab yahan watch_link (https://...) hai, isliye error nahi aayega!
-                [InlineKeyboardButton("▶️ Watch in App", url=watch_link)]
-            ])
+            f"✅ **Ready to Watch!**\n\n📂 `{file_name}`\n\nClick below to play in app!",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Watch in App", url=watch_link)]])
         )
     except Exception as e:
         logger.error(f"Error: {e}")
-        await message.reply_text(f"😥 Error: {e}")
+        await message.reply_text("😥 Error generating link.")
 
 # --- RUNNER ---
 async def start_services():
+    if not all([API_ID, API_HASH, BOT_TOKEN]):
+        logger.error("FATAL: Essential variables missing. Exiting.")
+        return
+
     app_runner = web.AppRunner(web.Application(client_max_size=1024**3))
     app_runner.app.add_routes(routes)
     await app_runner.setup()
