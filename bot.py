@@ -18,9 +18,9 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 # --- ⚙️ CONFIGURATION ---
 try:
     API_ID = int(os.environ.get("API_ID", "0"))
-    LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0")) # Naya Storage Channel
+    LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0"))
 except (ValueError, TypeError):
-    logging.error("FATAL: API_ID or LOG_CHANNEL is missing or invalid.")
+    logging.error("FATAL: API_ID or LOG_CHANNEL is missing.")
     exit(1)
 
 API_HASH = os.environ.get("API_HASH")
@@ -45,18 +45,17 @@ routes = web.RouteTableDef()
 
 @routes.get("/")
 async def status_check(request):
-    return web.Response(text="✅ Bot & Server Online! (Log Channel Enabled)")
+    return web.Response(text="✅ Bot & Server Online! (Pro ExoPlayer Streaming)")
 
 # =================================================================
-# 1. STREAMING ROUTE (User Engine will stream from Log Channel)
+# 1. FIX: PRO STREAMING ROUTE (ExoPlayer Hang Fix)
 # =================================================================
 @routes.get("/stream/{chat_id}/{message_id}")
 async def stream_handler(request):
     try:
-        chat_id = int(request.match_info['chat_id']) # Yeh hamesha Log Channel ki ID hogi
+        chat_id = int(request.match_info['chat_id'])
         message_id = int(request.match_info['message_id'])
         
-        # User Engine chupchaap Log Channel se video uthayega
         message = await user_app.get_messages(chat_id, message_id)
         media = message.video or message.document or message.audio
         
@@ -67,7 +66,11 @@ async def stream_handler(request):
         file_name = getattr(media, "file_name", "video.mp4") or "video.mp4"
         mime_type = getattr(media, "mime_type", "video/mp4") or "video/mp4"
 
-        # ExoPlayer Range Logic
+        # 🚀 FIX 1: ExoPlayer ko force karo ki yeh MP4 Video hi hai
+        if "video" not in mime_type:
+            mime_type = "video/mp4"
+
+        # Range Logic
         range_header = request.headers.get('Range', '')
         start = 0
         end = file_size - 1
@@ -92,18 +95,32 @@ async def stream_handler(request):
                 'Content-Range': f'bytes {start}-{end}/{file_size}',
                 'Content-Length': str(length),
                 'Content-Disposition': f'inline; filename="{file_name}"',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'no-cache' # Render ko cache karne se roko
             }
         )
         await response.prepare(request)
 
+        # 🚀 FIX 2: Pyrogram Hang Bug Fix (Manual Chunk Slicing)
         try:
-            async for chunk in user_app.stream_media(message, offset=start, limit=length):
+            bytes_sent = 0
+            # Notice: limit hata diya hai, ab hum khud loop todेंगे
+            async for chunk in user_app.stream_media(message, offset=start):
+                chunk_len = len(chunk)
+                if bytes_sent + chunk_len > length:
+                    # Sirf utna hi hissa bhejo jitna maanga hai, baaki kaat do
+                    chunk = chunk[:length - bytes_sent]
+                
                 await response.write(chunk)
+                bytes_sent += len(chunk)
+                
+                if bytes_sent >= length:
+                    break # Exact data bhej kar connection cleanly close karo
+                    
         except asyncio.CancelledError:
-            pass 
+            pass # App band ho gayi, koi baat nahi
         except Exception as e:
-            logger.error(f"Stream error: {e}")
+            logger.error(f"Stream interrupted: {e}")
 
         return response
     except Exception as e:
@@ -144,17 +161,16 @@ async def start(client, message):
 @bot_app.on_message(filters.private & (filters.video | filters.document | filters.audio))
 async def media_handler(client, message):
     if not PUBLIC_URL or not WEB_APP_URL or not STRING_SESSION or LOG_CHANNEL == 0:
-        return await message.reply_text("🔴 ERROR: PUBLIC_URL, WEB_APP_URL, STRING_SESSION ya LOG_CHANNEL missing hai.")
+        return await message.reply_text("🔴 ERROR: Configuration is missing.")
 
     try:
         media = message.video or message.document or message.audio
         if not media: return
         file_name = getattr(media, "file_name", "video") or "video"
 
-        # ⚠️ THE MAGIC: Bot file ko chupchaap Log Channel mein copy karega
+        # File ko Log Channel mein bhejo
         copied_msg = await message.copy(chat_id=LOG_CHANNEL)
         
-        # Ab link Log Channel ke message ID se banega
         watch_link = f"{PUBLIC_URL}/watch/{LOG_CHANNEL}/{copied_msg.id}"
         
         text = f"**{file_name}**\n\n**Watch Video / Download:**\n`{watch_link}`\n\n👆 *Click the link above to watch in DiskPlayer app or copy it to share!*"
@@ -165,7 +181,7 @@ async def media_handler(client, message):
         )
     except Exception as e:
         logger.error(f"Error: {e}")
-        await message.reply_text("😥 Error: Bot ko Log Channel ka Admin banaya hai kya?")
+        await message.reply_text(f"😥 Error: {e}")
 
 # --- RUNNER ---
 async def start_services():
@@ -174,12 +190,11 @@ async def start_services():
     await app_runner.setup()
     site = web.TCPSite(app_runner, HOST, PORT)
     await site.start()
-    logger.info(f"✅ Web Server running on Port {PORT}")
+    logger.info(f"✅ Web Server running")
     
     await bot_app.start()
-    logger.info("✅ Telegram Bot Started")
     await user_app.start()
-    logger.info("✅ User Session Started (2GB Limit Unlocked!)")
+    logger.info("✅ Bot & User Session Started")
     
     await asyncio.Event().wait()
 
