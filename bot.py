@@ -175,45 +175,35 @@ async def ping_cmd(client, message):
 
 @bot_app.on_message(filters.private & (filters.video | filters.document | filters.audio))
 async def media_handler(client, message):
-    # Safe check variables
     if not PUBLIC_URL or not WEB_APP_URL or not STRING_SESSION or LOG_CHANNEL == 0:
         return await message.reply_text("🔴 ERROR: Backend not configured. (Check ENV Variables)")
 
     try:
-        processing_msg = await message.reply_text("⏳ `Encrypting and Uploading to PlayBox Servers...`")
+        processing_msg = await message.reply_text("⏳ `Processing your Ultra HD File...`")
         
         media = message.video or message.document or message.audio
         if not media: 
             await processing_msg.edit_text("❌ No valid media found.")
             return
             
-        # Fallback for file_name
+        # Safe file name
         try:
             file_name = getattr(media, "file_name", "PlayBox_Video.mp4")
             if not file_name: file_name = "PlayBox_Video.mp4"
         except Exception:
             file_name = "PlayBox_Video.mp4"
-        
-        # Calculate Size
-        try:
-            size_mb = getattr(media, "file_size", 0) / (1024 * 1024)
-        except:
-            size_mb = 0
 
-        # 🚀 FIX: TRY TO COPY TO LOG CHANNEL SAFELY
+        # 🚀 THE 2GB BYPASS TRICK: Use FORWARD instead of COPY
         try:
-            copied_msg = await message.copy(chat_id=LOG_CHANNEL)
-        except ChatAdminRequired:
-            await processing_msg.edit_text("❌ ERROR: Bot is not an Admin in the LOG_CHANNEL.")
-            return
-        except ChannelInvalid:
-            await processing_msg.edit_text("❌ ERROR: The LOG_CHANNEL ID is invalid or Bot is not a member.")
-            return
+            # Chhota sa delay taaki Telegram file upload process poora kar le
+            await asyncio.sleep(1) 
+            # Forward karne se bot pe 0% load padta hai
+            forwarded_msg = await message.forward(chat_id=LOG_CHANNEL)
         except Exception as e:
-            await processing_msg.edit_text(f"❌ ERROR copying to channel: {e}")
+            await processing_msg.edit_text(f"❌ ERROR sending to Log Channel: {e}")
             return
 
-        watch_link = f"{PUBLIC_URL}/watch/{LOG_CHANNEL}/{copied_msg.id}"
+        watch_link = f"{PUBLIC_URL}/watch/{LOG_CHANNEL}/{forwarded_msg.id}"
 
         # 🚀 THE TERABOX STYLE BLUE LINK FORMAT 🚀
         text = f"[{watch_link}]({watch_link})\n\n"
