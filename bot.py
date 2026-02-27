@@ -101,7 +101,7 @@ async def watch_redirect(request):
     
     # 🚀 YAHAN APNA DIRECT APK DOWNLOAD LINK DAALEIN 🚀
     # (Jab app Play Store par aa jayega, tab isko Play Store ke link se badal dena)
-    apk_download_link = "https://your-website.com/PlayBox.apk" 
+    apk_download_link = "https://drive.google.com/file/d/1L0LmQ4PmQAtQs1YLibJ-IcpA-hvwN9_Q/view?usp=drivesdk" 
 
     html_content = f"""
     <!DOCTYPE html>
@@ -190,7 +190,7 @@ async def media_handler(client, message):
         text = f"**{file_name}**\n\n"
         text += f"**Watch Video / Download:**\n"
         text += f"`{watch_link}`\n\n" # Ye link copy karne ke liye hai
-        text += f"👆 *Click the link above to watch in DiskPlayer app or copy it to share!*"
+        text += f"👆 *Click the link above to watch in PlayBox app or copy it to share!*"
 
         await message.reply_text(
             text,
