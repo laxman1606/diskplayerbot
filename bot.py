@@ -89,39 +89,73 @@ async def stream_handler(request):
     except Exception as e:
         logger.error(f"Handler Error: {e}")
         return web.Response(status=500, text="Server Error")
-
 # =================================================================
-# 2. REDIRECT ROUTE (Terabox wala Magic Page!)
+# 2. REDIRECT ROUTE (SMART TERABOX/MX PLAYER STYLE)
 # =================================================================
 @routes.get("/watch/{chat_id}/{message_id}")
 async def watch_redirect(request):
     chat_id = request.match_info['chat_id']
     message_id = request.match_info['message_id']
-    
     stream_link = f"{PUBLIC_URL}/stream/{chat_id}/{message_id}"
     app_deep_link = f"{WEB_APP_URL}?url={urllib.parse.quote(stream_link)}"
     
+    # 🚀 YAHAN APNA DIRECT APK DOWNLOAD LINK DAALEIN 🚀
+    # (Jab app Play Store par aa jayega, tab isko Play Store ke link se badal dena)
+    apk_download_link = "https://your-website.com/PlayBox.apk" 
+
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Opening App...</title>
+        <title>PlayBox - Ultra HD Player</title>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-            body {{ font-family: Arial, sans-serif; text-align: center; padding-top: 50px; background-color: #121212; color: white; }}
-            .loader {{ border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }}
+            body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; background-color: #0A0C10; color: white; padding-top: 50px; margin: 0; }}
+            .container {{ padding: 20px; }}
+            .logo {{ font-size: 32px; font-weight: bold; color: #FF6F00; margin-bottom: 5px; }}
+            .sub-logo {{ font-size: 14px; color: #00E676; margin-bottom: 30px; }}
+            .loader {{ border: 4px solid #1A1D1E; border-top: 4px solid #FF6F00; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 20px auto; }}
             @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
-            a {{ color: #3498db; text-decoration: none; padding: 10px 20px; border: 1px solid #3498db; border-radius: 5px; display: inline-block; margin-top: 20px; }}
+            .btn {{ background-color: #FF6F00; color: white; text-decoration: none; padding: 15px 30px; border-radius: 30px; display: inline-block; margin-top: 25px; font-weight: bold; font-size: 16px; box-shadow: 0 4px 6px rgba(255,111,0,0.3); }}
+            .btn-secondary {{ background-color: #1A1D1E; border: 1px solid #FF6F00; color: #FF6F00; margin-top: 15px; }}
+            p {{ color: #A0A0A0; font-size: 14px; line-height: 1.5; margin-top: 20px; }}
+            #fallback-msg {{ display: none; margin-top: 30px; }}
         </style>
     </head>
     <body>
-        <h2>Opening in DiskPlayer App...</h2>
-        <div class="loader"></div>
-        <p>If the app does not open automatically, click below:</p>
-        <a href="{app_deep_link}">Open App Manually</a>
-        
+        <div class="container">
+            <div class="logo">PlayBox</div>
+            <div class="sub-logo">Ultra HD Video Player</div>
+            
+            <h2 id="status-text">Opening App...</h2>
+            <div class="loader" id="loader"></div>
+            
+            <p>If the app doesn't open automatically,<br>please click the button below.</p>
+            <a href="{app_deep_link}" class="btn">▶ Open in PlayBox App</a>
+
+            <!-- 🚀 SMART FALLBACK LOGIC (Jo dikhega jab app nahi hoga) -->
+            <div id="fallback-msg">
+                <p style="color: #FF1744; font-weight: bold;">App Not Found!</p>
+                <p>Looks like you don't have PlayBox installed.<br>Download it now to watch this video in Ultra HD.</p>
+                <a href="{apk_download_link}" class="btn btn-secondary">⬇ Download PlayBox App</a>
+            </div>
+        </div>
+
         <script>
+            // Ye script jaadu karegi!
+            // 1. Pehle App kholne ki koshish karegi
             window.location.href = "{app_deep_link}";
+
+            // 2. Agar 2.5 second ke baad bhi page khula hai (matlab app nahi khula),
+            // Toh samajh jao app install nahi hai.
+            setTimeout(function() {{
+                document.getElementById('status-text').style.display = 'none';
+                document.getElementById('loader').style.display = 'none';
+                document.getElementById('fallback-msg').style.display = 'block';
+                
+                // Optional: Seedha download shuru karwana ho toh ye line uncomment kar dein:
+                // window.location.href = "{apk_download_link}"; 
+            }}, 2500); 
         </script>
     </body>
     </html>
