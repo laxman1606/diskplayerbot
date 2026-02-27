@@ -15,20 +15,25 @@ except RuntimeError:
 
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.errors import ChatAdminRequired, ChannelInvalid
 
 # --- ⚙️ CONFIGURATION ---
 try:
     API_ID = int(os.environ.get("API_ID", "0"))
-    LOG_CHANNEL = int(os.environ.get("LOG_CHANNEL", "0"))
+    # Ensure LOG_CHANNEL is treated as an integer and starts with -100 if it's a channel
+    log_channel_str = os.environ.get("LOG_CHANNEL", "0").strip()
+    if log_channel_str and not log_channel_str.startswith("-100"):
+        log_channel_str = "-100" + log_channel_str
+    LOG_CHANNEL = int(log_channel_str)
 except (ValueError, TypeError):
     logging.error("FATAL: API_ID or LOG_CHANNEL is invalid.")
     exit(1)
 
-API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
-STRING_SESSION = os.environ.get("STRING_SESSION")
-PUBLIC_URL = os.environ.get("PUBLIC_URL")
-WEB_APP_URL = os.environ.get("WEB_APP_URL", "playbox://play")
+API_HASH = os.environ.get("API_HASH", "").strip()
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
+STRING_SESSION = os.environ.get("STRING_SESSION", "").strip()
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "").strip().rstrip('/')
+WEB_APP_URL = os.environ.get("WEB_APP_URL", "playbox://play").strip()
 PORT = int(os.environ.get("PORT", 8080))
 HOST = "0.0.0.0"
 
@@ -102,7 +107,7 @@ async def watch_redirect(request):
     stream_link = f"{PUBLIC_URL}/stream/{chat_id}/{message_id}"
     app_deep_link = f"{WEB_APP_URL}?url={urllib.parse.quote(stream_link)}"
     
-    apk_download_link = "https://drive.google.com/file/d/1L0LmQ4PmQAtQs1YLibJ-IcpA-hvwN9_Q/view?usp=drivesdk" # Isko baad me update kar dena
+    apk_download_link = "https://your-website.com/PlayBox.apk" # Isko baad me update kar dena
 
     html_content = f"""
     <!DOCTYPE html>
@@ -148,7 +153,7 @@ async def watch_redirect(request):
     return web.Response(text=html_content, content_type='text/html')
 
 # =================================================================
-# 🚀 ADVANCED BOT COMMANDS (TERABOX STYLE)
+# 🚀 ADVANCED BOT COMMANDS 
 # =================================================================
 
 @bot_app.on_message(filters.command("start"))
@@ -170,20 +175,44 @@ async def ping_cmd(client, message):
 
 @bot_app.on_message(filters.private & (filters.video | filters.document | filters.audio))
 async def media_handler(client, message):
+    # Safe check variables
     if not PUBLIC_URL or not WEB_APP_URL or not STRING_SESSION or LOG_CHANNEL == 0:
-        return await message.reply_text("🔴 ERROR: Backend not configured.")
+        return await message.reply_text("🔴 ERROR: Backend not configured. (Check ENV Variables)")
 
     try:
         processing_msg = await message.reply_text("⏳ `Encrypting and Uploading to PlayBox Servers...`")
         
         media = message.video or message.document or message.audio
-        if not media: return
-        file_name = getattr(media, "file_name", "video.mp4") or "video.mp4"
+        if not media: 
+            await processing_msg.edit_text("❌ No valid media found.")
+            return
+            
+        # Fallback for file_name
+        try:
+            file_name = getattr(media, "file_name", "PlayBox_Video.mp4")
+            if not file_name: file_name = "PlayBox_Video.mp4"
+        except Exception:
+            file_name = "PlayBox_Video.mp4"
         
         # Calculate Size
-        size_mb = getattr(media, "file_size", 0) / (1024 * 1024)
+        try:
+            size_mb = getattr(media, "file_size", 0) / (1024 * 1024)
+        except:
+            size_mb = 0
 
-        copied_msg = await message.copy(chat_id=LOG_CHANNEL)
+        # 🚀 FIX: TRY TO COPY TO LOG CHANNEL SAFELY
+        try:
+            copied_msg = await message.copy(chat_id=LOG_CHANNEL)
+        except ChatAdminRequired:
+            await processing_msg.edit_text("❌ ERROR: Bot is not an Admin in the LOG_CHANNEL.")
+            return
+        except ChannelInvalid:
+            await processing_msg.edit_text("❌ ERROR: The LOG_CHANNEL ID is invalid or Bot is not a member.")
+            return
+        except Exception as e:
+            await processing_msg.edit_text(f"❌ ERROR copying to channel: {e}")
+            return
+
         watch_link = f"{PUBLIC_URL}/watch/{LOG_CHANNEL}/{copied_msg.id}"
 
         # 🚀 THE TERABOX STYLE BLUE LINK FORMAT 🚀
@@ -195,12 +224,12 @@ async def media_handler(client, message):
         await processing_msg.delete()
         await message.reply_text(
             text, 
-            disable_web_page_preview=False, # Yahan True se False kiya taaki blue box aaye
+            disable_web_page_preview=False, 
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Watch Online", url=watch_link)]])
         )
     except Exception as e:
         logger.error(f"Error: {e}")
-        await message.reply_text(f"😥 Error generating link.")
+        await message.reply_text(f"😥 Error generating link: {e}")
 
 # --- RUNNER ---
 async def start_services():
