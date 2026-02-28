@@ -15,7 +15,6 @@ except RuntimeError:
 
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import ChatAdminRequired, ChannelInvalid
 
 # --- ⚙️ CONFIGURATION ---
 try:
@@ -44,6 +43,7 @@ logger = logging.getLogger(__name__)
 if not os.path.exists("sessions"):
     os.makedirs("sessions")
 
+# 🚀 DUAL ENGINE SETUP
 bot_app = Client("sessions/Bot_Engine", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 user_app = Client("sessions/User_Engine", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
 
@@ -51,10 +51,10 @@ routes = web.RouteTableDef()
 
 @routes.get("/")
 async def status_check(request):
-    return web.Response(text="✅ PlayBox Mega Server is Live & Streaming perfectly!")
+    return web.Response(text="✅ PlayBox 10000x Mega Server is Live & Crash-Proof!")
 
 # =================================================================
-# 🚀 1. SUPER PRO STREAMING ROUTE (Fix for 100MB+ Files)
+# 🚀 1. SUPER OPTIMIZED STREAMING (RAM Bachaane Wala Code)
 # =================================================================
 @routes.get("/stream/{chat_id}/{message_id}")
 async def stream_handler(request):
@@ -95,15 +95,15 @@ async def stream_handler(request):
             'Access-Control-Allow-Origin': '*'
         }
         
-        # 🚀 YAHI THA CRASH KA REASON! StreamResponse use karna zaroori hai.
         response = web.StreamResponse(status=206 if range_header else 200, headers=headers)
         await response.prepare(request)
 
         try:
+            # 🚀 MEMORY FIX: Aiohttp direct pipe
             async for chunk in user_app.stream_media(message, offset=start, limit=length):
                 await response.write(chunk)
         except (asyncio.CancelledError, ConnectionResetError):
-            pass # ExoPlayer ne skip kiya, server ko crash mat karo
+            pass # User ne app band kiya, server ko farq nahi padega
         except Exception as e:
             logger.error(f"Stream error: {e}")
 
@@ -112,7 +112,7 @@ async def stream_handler(request):
         return web.Response(status=500, text=f"Error: {e}")
 
 # =================================================================
-# 🚀 2. ROCK SOLID DOWNLOAD ROUTE
+# 🚀 2. DOWNLOAD ROUTE (Bina Crash Wala)
 # =================================================================
 @routes.get("/download/{chat_id}/{message_id}")
 async def download_handler(request):
@@ -143,12 +143,16 @@ async def download_handler(request):
     except Exception:
         return web.Response(status=500, text="Download Error")
 
+# =================================================================
+# 🚀 3. SMART REDIRECT ROUTE
+# =================================================================
 @routes.get("/watch/{chat_id}/{message_id}")
 async def watch_redirect(request):
     chat_id = request.match_info['chat_id']
     message_id = request.match_info['message_id']
     stream_link = f"{PUBLIC_URL}/stream/{chat_id}/{message_id}"
     
+    # 💯 PRO ANDROID INTENT
     android_intent = f"intent://play?url={urllib.parse.quote(stream_link)}#Intent;scheme=myvideoplayer;package=com.playbox.app;end;"
     apk_download_link = "https://your-website.com/PlayBox.apk" 
 
@@ -193,7 +197,7 @@ async def watch_redirect(request):
     return web.Response(text=html_content, content_type='text/html')
 
 # =================================================================
-# 🚀 ADVANCED BOT COMMANDS
+# 🤖 BOT COMMANDS
 # =================================================================
 
 @bot_app.on_message(filters.command("start") & filters.private)
@@ -229,7 +233,8 @@ async def media_handler(client, message):
         processing_msg = await message.reply_text("⏳ `Extracting Thumbnail & Generating Link...`")
         
         media = message.video or message.document or message.audio
-        if not media: return await processing_msg.edit_text("❌ No valid media found.")
+        if not media: 
+            return await processing_msg.edit_text("❌ No valid media found.")
             
         file_name = getattr(media, "file_name", "PlayBox_Video.mp4") or "PlayBox_Video.mp4"
         try:
@@ -237,49 +242,8 @@ async def media_handler(client, message):
         except:
             size_mb = 0
 
+        # 🚀 1. File Ko Safe Log Channel Me Bhejo
         try:
-            forwarded_msg = await bot_app.forward_messages(LOG_CHANNEL, message.chat.id, message.id)
+            copied_msg = await message.copy(chat_id=LOG_CHANNEL)
         except Exception as e:
-            return await processing_msg.edit_text(f"❌ Error forwarding to Log Channel. Make sure Bot is Admin. Error: {e}")
-
-        watch_link = f"{PUBLIC_URL}/watch/{LOG_CHANNEL}/{forwarded_msg.id}"
-        download_link = f"{PUBLIC_URL}/download/{LOG_CHANNEL}/{forwarded_msg.id}"
-
-        text = f"**{file_name}**\n"
-        text += f"💾 **Size:** `{size_mb} MB`\n\n"
-        text += f"🔗 **PlayBox Link:**\n[{watch_link}]({watch_link})\n\n"
-        text += f"PlayBox offers Ultra HD Ad-Free video streaming."
-
-        buttons = InlineKeyboardMarkup([
-            [InlineKeyboardButton("▶️ Watch in PlayBox", url=watch_link)],
-            [InlineKeyboardButton("📥 Download File", url=download_link)]
-        ])
-
-        thumb_path = None
-        if hasattr(media, "thumbs") and media.thumbs:
-            thumb_path = await bot_app.download_media(media.thumbs[0].file_id)
-
-        await processing_msg.delete()
-        if thumb_path:
-            await message.reply_photo(photo=thumb_path, caption=text, reply_markup=buttons)
-            os.remove(thumb_path)
-        else:
-            await message.reply_text(text, disable_web_page_preview=False, reply_markup=buttons)
-
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        await message.reply_text(f"😥 Error generating link: {e}")
-
-async def start_services():
-    app_runner = web.AppRunner(web.Application(client_max_size=1024**3))
-    app_runner.app.add_routes(routes)
-    await app_runner.setup()
-    site = web.TCPSite(app_runner, HOST, PORT)
-    await site.start()
-    logger.info("✅ Web Server running")
-    await bot_app.start()
-    await user_app.start()
-    await asyncio.Event().wait()
-
-if __name__ == "__main__":
-    loop.run_until_complete(start_services())
+            return await processing_msg.edit_text(f"❌
