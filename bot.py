@@ -15,6 +15,7 @@ except RuntimeError:
 
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.errors import ChatAdminRequired, ChannelInvalid
 
 # --- ⚙️ CONFIGURATION ---
 try:
@@ -31,10 +32,10 @@ API_HASH = os.environ.get("API_HASH", "").strip()
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "").strip()
 STRING_SESSION = os.environ.get("STRING_SESSION", "").strip()
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "").strip().rstrip('/')
+WEB_APP_URL = os.environ.get("WEB_APP_URL", "playbox://play").strip()
 PORT = int(os.environ.get("PORT", 8080))
 HOST = "0.0.0.0"
 
-# Welcome Image
 WELCOME_IMAGE = "https://telegra.ph/file/a1c1d85e7a9b09be8b082.jpg"
 
 logging.basicConfig(level=logging.INFO)
@@ -43,7 +44,6 @@ logger = logging.getLogger(__name__)
 if not os.path.exists("sessions"):
     os.makedirs("sessions")
 
-# DUAL ENGINE
 bot_app = Client("sessions/Bot_Engine", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 user_app = Client("sessions/User_Engine", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
 
@@ -51,9 +51,11 @@ routes = web.RouteTableDef()
 
 @routes.get("/")
 async def status_check(request):
-    return web.Response(text="✅ PlayBox Mega Server is Live!")
+    return web.Response(text="✅ PlayBox Mega Server is Live & Streaming perfectly!")
 
-# 🚀 1. STREAMING ROUTE (Video Play Karne Ke Liye)
+# =================================================================
+# 🚀 1. SUPER PRO STREAMING ROUTE (Fix for 100MB+ Files)
+# =================================================================
 @routes.get("/stream/{chat_id}/{message_id}")
 async def stream_handler(request):
     try:
@@ -84,24 +86,34 @@ async def stream_handler(request):
         if start >= file_size: return web.Response(status=416, text="Requested Range Not Satisfiable")
         length = end - start + 1
 
-        async def file_generator():
-            try:
-                async for chunk in user_app.stream_media(message, offset=start, limit=length): yield chunk
-            except asyncio.CancelledError: pass
-            except Exception as e: logger.error(f"Stream error: {e}")
-
         headers = {
             'Content-Type': mime_type,
             'Accept-Ranges': 'bytes',
             'Content-Range': f'bytes {start}-{end}/{file_size}',
             'Content-Length': str(length),
+            'Content-Disposition': f'inline; filename="{file_name}"',
             'Access-Control-Allow-Origin': '*'
         }
-        return web.Response(body=file_generator(), headers=headers, status=206 if range_header else 200)
+        
+        # 🚀 YAHI THA CRASH KA REASON! StreamResponse use karna zaroori hai.
+        response = web.StreamResponse(status=206 if range_header else 200, headers=headers)
+        await response.prepare(request)
+
+        try:
+            async for chunk in user_app.stream_media(message, offset=start, limit=length):
+                await response.write(chunk)
+        except (asyncio.CancelledError, ConnectionResetError):
+            pass # ExoPlayer ne skip kiya, server ko crash mat karo
+        except Exception as e:
+            logger.error(f"Stream error: {e}")
+
+        return response
     except Exception as e:
         return web.Response(status=500, text=f"Error: {e}")
 
-# 🚀 2. DOWNLOAD ROUTE (Zabardasti Download Karwane Ke Liye)
+# =================================================================
+# 🚀 2. ROCK SOLID DOWNLOAD ROUTE
+# =================================================================
 @routes.get("/download/{chat_id}/{message_id}")
 async def download_handler(request):
     try:
@@ -112,29 +124,33 @@ async def download_handler(request):
         file_name = getattr(media, "file_name", "PlayBox_Video.mp4") or "PlayBox_Video.mp4"
         file_size = getattr(media, "file_size", 0)
 
-        async def file_generator():
-            try:
-                async for chunk in user_app.stream_media(message): yield chunk
-            except Exception: pass
-
         headers = {
             'Content-Type': 'application/octet-stream',
-            'Content-Disposition': f'attachment; filename="{file_name}"', # Ye command browser ko download karne bolti hai
-            'Content-Length': str(file_size)
+            'Content-Disposition': f'attachment; filename="{file_name}"',
+            'Content-Length': str(file_size),
+            'Access-Control-Allow-Origin': '*'
         }
-        return web.Response(body=file_generator(), headers=headers)
+        
+        response = web.StreamResponse(status=200, headers=headers)
+        await response.prepare(request)
+
+        try:
+            async for chunk in user_app.stream_media(message):
+                await response.write(chunk)
+        except (asyncio.CancelledError, ConnectionResetError): pass
+
+        return response
     except Exception:
         return web.Response(status=500, text="Download Error")
 
-# 🚀 3. REDIRECT ROUTE (Auto PlayBox Opener)
 @routes.get("/watch/{chat_id}/{message_id}")
 async def watch_redirect(request):
     chat_id = request.match_info['chat_id']
     message_id = request.match_info['message_id']
     stream_link = f"{PUBLIC_URL}/stream/{chat_id}/{message_id}"
     
-    # 💯 PRO ANDROID INTENT (Guarantee PlayBox kholega)
     android_intent = f"intent://play?url={urllib.parse.quote(stream_link)}#Intent;scheme=myvideoplayer;package=com.playbox.app;end;"
+    apk_download_link = "https://your-website.com/PlayBox.apk" 
 
     html_content = f"""
     <!DOCTYPE html>
@@ -148,16 +164,28 @@ async def watch_redirect(request):
             .loader {{ border: 4px solid #1A1D1E; border-top: 4px solid #1976D2; border-radius: 50%; width: 50px; height: 50px; animation: spin 1s linear infinite; margin: 20px auto; }}
             @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
             .btn {{ background-color: #1976D2; color: white; text-decoration: none; padding: 15px 30px; border-radius: 30px; display: inline-block; margin-top: 25px; font-weight: bold; }}
+            .btn-secondary {{ background-color: transparent; border: 2px solid #00E676; color: #00E676; margin-top: 10px; }}
+            #fallback {{ display: none; margin-top: 30px; }}
         </style>
     </head>
     <body>
         <div class="logo">▶ PlayBox</div>
         <p style="color:#8A8D93;">Ultra HD Video Player</p>
-        <div class="loader"></div>
-        <p>Opening video securely...</p>
-        <a href="{android_intent}" class="btn">Open in PlayBox App</a>
+        <h3 id="status">Redirecting to App...</h3>
+        <div class="loader" id="load-icon"></div>
+        <a href="{android_intent}" class="btn" id="open-btn">Open in PlayBox App</a>
+        
+        <div id="fallback">
+            <p style="color: #FF1744;">App Not Installed?</p>
+            <a href="{apk_download_link}" class="btn btn-secondary">⬇ Download PlayBox APK</a>
+        </div>
         <script>
             window.location.href = "{android_intent}";
+            setTimeout(function() {{
+                document.getElementById('status').style.display = 'none';
+                document.getElementById('load-icon').style.display = 'none';
+                document.getElementById('fallback').style.display = 'block';
+            }}, 2500); 
         </script>
     </body>
     </html>
@@ -165,7 +193,7 @@ async def watch_redirect(request):
     return web.Response(text=html_content, content_type='text/html')
 
 # =================================================================
-# 🤖 BOT COMMANDS
+# 🚀 ADVANCED BOT COMMANDS
 # =================================================================
 
 @bot_app.on_message(filters.command("start") & filters.private)
@@ -176,11 +204,9 @@ async def start(client, message):
     text += f"Send me any Movie or Video file, and I will generate an **Ultra HD Streaming Link** for you. 🚀"
 
     buttons = InlineKeyboardMarkup([[InlineKeyboardButton("💬 Help Menu", callback_data="help")]])
-    
     try:
         await message.reply_photo(photo=WELCOME_IMAGE, caption=text, reply_markup=buttons)
     except Exception:
-        # Agar image load nahi hui toh text bhej do
         await message.reply_text(text, reply_markup=buttons)
 
 @bot_app.on_message(filters.command("help") & filters.private)
@@ -211,13 +237,11 @@ async def media_handler(client, message):
         except:
             size_mb = 0
 
-        # Safe forward to LOG CHANNEL
         try:
             forwarded_msg = await bot_app.forward_messages(LOG_CHANNEL, message.chat.id, message.id)
         except Exception as e:
             return await processing_msg.edit_text(f"❌ Error forwarding to Log Channel. Make sure Bot is Admin. Error: {e}")
 
-        # LINKS
         watch_link = f"{PUBLIC_URL}/watch/{LOG_CHANNEL}/{forwarded_msg.id}"
         download_link = f"{PUBLIC_URL}/download/{LOG_CHANNEL}/{forwarded_msg.id}"
 
@@ -231,7 +255,6 @@ async def media_handler(client, message):
             [InlineKeyboardButton("📥 Download File", url=download_link)]
         ])
 
-        # Thumb logic
         thumb_path = None
         if hasattr(media, "thumbs") and media.thumbs:
             thumb_path = await bot_app.download_media(media.thumbs[0].file_id)
