@@ -230,7 +230,7 @@ async def media_handler(client, message):
         return await message.reply_text("🔴 ERROR: Backend env variables missing.")
 
     try:
-        processing_msg = await message.reply_text("⏳ `Extracting Thumbnail & Generating Link...`")
+        processing_msg = await message.reply_text("⏳ `Extracting & Generating Link...`")
         
         media = message.video or message.document or message.audio
         if not media: 
@@ -242,17 +242,17 @@ async def media_handler(client, message):
         except:
             size_mb = 0
 
-        # 🚀 1. File Ko Safe Log Channel Me Bhejo
+        # Safe forward to LOG CHANNEL
         try:
             copied_msg = await message.copy(chat_id=LOG_CHANNEL)
         except Exception as e:
-            return await processing_msg.edit_text(f"❌ Error forwarding to Log Channel. Make sure Bot is Admin. Error: {e}")
+            return await processing_msg.edit_text(f"❌ Error copying to Log Channel: {e}")
 
         # LINKS GENERATION
         watch_link = f"{PUBLIC_URL}/watch/{LOG_CHANNEL}/{copied_msg.id}"
         download_link = f"{PUBLIC_URL}/download/{LOG_CHANNEL}/{copied_msg.id}"
 
-        # 🚀 DISKWALA STYLE TEXT FORMAT
+        # DISKWALA STYLE TEXT FORMAT
         text = f"**{file_name}**\n"
         text += f"💾 **Size:** `{size_mb} MB`\n\n"
         text += f"🔗 **PlayBox Link:**\n[{watch_link}]({watch_link})\n\n"
@@ -263,24 +263,25 @@ async def media_handler(client, message):
             [InlineKeyboardButton("📥 Download File", url=download_link)]
         ])
 
-        # 🚀 2. THUMBNAIL BYPASS LOGIC (Crash Fix for 100MB+ files)
-        # Normal bot 20MB+ files ka thumbnail nahi nikal sakta, isliye hum "user_app" (String session) se photo khinchwayenge!
+        # 🚀 THE ULTIMATE THUMBNAIL CRASH FIX 🚀
         thumb_path = None
-        if hasattr(media, "thumbs") and media.thumbs:
+        if getattr(media, "thumbs", None) and len(media.thumbs) > 0:
             try:
-                # Bot ke bajaye User App (String Session) se download karao
-                thumb_path = await user_app.download_media(media.thumbs[0].file_id)
-            except Exception as e:
-                logger.error(f"Thumbnail error: {e}")
-                pass 
+                # Agar thumbnail aaram se download hua toh theek
+                thumb_path = await bot_app.download_media(media.thumbs[0].file_id)
+            except Exception as thumb_error:
+                # Agar "0 B" wala error aaya, toh ignore kardo, crash mat ho!
+                logger.warning(f"Thumbnail failed (0 B Error ignored): {thumb_error}")
+                thumb_path = None
 
         await processing_msg.delete()
         
-        # Send Photo with caption (or text if no photo)
-        if thumb_path:
+        # Agar photo mili toh photo ke sath bhejo
+        if thumb_path and os.path.exists(thumb_path):
             await message.reply_photo(photo=thumb_path, caption=text, reply_markup=buttons)
-            os.remove(thumb_path) # Delete from server memory to prevent overload
+            os.remove(thumb_path) # Memory saaf karo
         else:
+            # Agar photo nahi mili toh sirf Text aur Link bhejo, par ruko mat!
             await message.reply_text(text, disable_web_page_preview=False, reply_markup=buttons)
 
     except Exception as e:
