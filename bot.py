@@ -246,4 +246,60 @@ async def media_handler(client, message):
         try:
             copied_msg = await message.copy(chat_id=LOG_CHANNEL)
         except Exception as e:
-            return await processing_msg.edit_text(f"❌
+            return await processing_msg.edit_text(f"❌ Error forwarding to Log Channel. Make sure Bot is Admin. Error: {e}")
+
+        # LINKS GENERATION
+        watch_link = f"{PUBLIC_URL}/watch/{LOG_CHANNEL}/{copied_msg.id}"
+        download_link = f"{PUBLIC_URL}/download/{LOG_CHANNEL}/{copied_msg.id}"
+
+        # 🚀 DISKWALA STYLE TEXT FORMAT
+        text = f"**{file_name}**\n"
+        text += f"💾 **Size:** `{size_mb} MB`\n\n"
+        text += f"🔗 **PlayBox Link:**\n[{watch_link}]({watch_link})\n\n"
+        text += f"PlayBox offers Ultra HD Ad-Free video streaming."
+
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("▶️ Watch in PlayBox", url=watch_link)],
+            [InlineKeyboardButton("📥 Download File", url=download_link)]
+        ])
+
+        # 🚀 2. THUMBNAIL BYPASS LOGIC (Crash Fix for 100MB+ files)
+        # Normal bot 20MB+ files ka thumbnail nahi nikal sakta, isliye hum "user_app" (String session) se photo khinchwayenge!
+        thumb_path = None
+        if hasattr(media, "thumbs") and media.thumbs:
+            try:
+                # Bot ke bajaye User App (String Session) se download karao
+                thumb_path = await user_app.download_media(media.thumbs[0].file_id)
+            except Exception as e:
+                logger.error(f"Thumbnail error: {e}")
+                pass 
+
+        await processing_msg.delete()
+        
+        # Send Photo with caption (or text if no photo)
+        if thumb_path:
+            await message.reply_photo(photo=thumb_path, caption=text, reply_markup=buttons)
+            os.remove(thumb_path) # Delete from server memory to prevent overload
+        else:
+            await message.reply_text(text, disable_web_page_preview=False, reply_markup=buttons)
+
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        await message.reply_text(f"😥 Error generating link: {e}")
+
+# --- RUNNER ---
+async def start_services():
+    # Max size badha di taaki heavy files accept hon
+    app_runner = web.AppRunner(web.Application(client_max_size=1024**3))
+    app_runner.app.add_routes(routes)
+    await app_runner.setup()
+    site = web.TCPSite(app_runner, HOST, PORT)
+    await site.start()
+    logger.info("✅ Web Server running")
+    
+    await bot_app.start()
+    await user_app.start()
+    await asyncio.Event().wait()
+
+if __name__ == "__main__":
+    loop.run_until_complete(start_services())
