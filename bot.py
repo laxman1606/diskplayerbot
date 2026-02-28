@@ -20,7 +20,6 @@ from pyrogram.errors import ChatAdminRequired, ChannelInvalid
 # --- ⚙️ CONFIGURATION ---
 try:
     API_ID = int(os.environ.get("API_ID", "0"))
-    # Ensure LOG_CHANNEL is treated as an integer and starts with -100 if it's a channel
     log_channel_str = os.environ.get("LOG_CHANNEL", "0").strip()
     if log_channel_str and not log_channel_str.startswith("-100"):
         log_channel_str = "-100" + log_channel_str
@@ -37,29 +36,29 @@ WEB_APP_URL = os.environ.get("WEB_APP_URL", "playbox://play").strip()
 PORT = int(os.environ.get("PORT", 8080))
 HOST = "0.0.0.0"
 
+# 🚀 WELCOME IMAGE URL (Aap isko apni image se replace kar sakte ho)
+WELCOME_IMAGE = "https://telegra.ph/file/a1c1d85e7a9b09be8b082.jpg"
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 if not os.path.exists("sessions"):
     os.makedirs("sessions")
 
-# DUAL ENGINE
 bot_app = Client("sessions/Bot_Engine", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 user_app = Client("sessions/User_Engine", api_id=API_ID, api_hash=API_HASH, session_string=STRING_SESSION)
 
 routes = web.RouteTableDef()
 
-# --- WEB SERVER ROUTES ---
 @routes.get("/")
 async def status_check(request):
-    return web.Response(text="✅ PlayBox 1000x Server is Live!")
+    return web.Response(text="✅ PlayBox 10000x Mega Server is Live!")
 
 @routes.get("/stream/{chat_id}/{message_id}")
 async def stream_handler(request):
     try:
         chat_id = int(request.match_info['chat_id'])
         message_id = int(request.match_info['message_id'])
-        
         message = await user_app.get_messages(chat_id, message_id)
         media = message.video or message.document or message.audio
         if not media: return web.Response(status=404, text="No Media")
@@ -107,7 +106,7 @@ async def watch_redirect(request):
     stream_link = f"{PUBLIC_URL}/stream/{chat_id}/{message_id}"
     app_deep_link = f"{WEB_APP_URL}?url={urllib.parse.quote(stream_link)}"
     
-    apk_download_link = "https://your-website.com/PlayBox.apk" # Isko baad me update kar dena
+    apk_download_link = "https://drive.google.com/file/d/1RvFKNGsweV1IwWYtfy96vDpQ5b4VC5hw/view?usp=drivesdk" 
 
     html_content = f"""
     <!DOCTYPE html>
@@ -153,23 +152,31 @@ async def watch_redirect(request):
     return web.Response(text=html_content, content_type='text/html')
 
 # =================================================================
-# 🚀 ADVANCED BOT COMMANDS 
+# 🚀 10000x ADVANCE BOT COMMANDS
 # =================================================================
 
 @bot_app.on_message(filters.command("start"))
 async def start(client, message):
-    text = f"👋 **Welcome to PlayBox Pro!**\n\nSend me any Video or Document, and I will generate an **Ultra HD High-Speed Streaming Link** for you.\n\nUse /help to see all features."
-    await message.reply_text(text)
+    user_name = message.from_user.first_name
+    user_id = message.from_user.id
+    
+    text = f"👋 **Hello {user_name}! Welcome to PlayBox Pro.**\n\n"
+    text += f"🆔 **Your ID:** `{user_id}`\n"
+    text += f"⚙️ **Status:** `Premium Active 👑`\n\n"
+    text += f"Send me any Movie, Series, or Video file, and I will generate an **Ultra HD High-Speed Streaming Link** with a Thumbnail for you.\n\n"
+    text += f"Fast. Secure. 10000x Advance. 🚀"
 
-@bot_app.on_message(filters.command("help"))
-async def help_cmd(client, message):
-    text = "**🛠 PlayBox Help Menu:**\n\n1. Send any MKV, MP4 video.\n2. Get an instant secure link.\n3. Watch seamlessly without downloading.\n\n`Dev: 1000x Advance Setup`"
-    await message.reply_text(text)
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📱 Download PlayBox App", url="https://your-website.com")],
+        [InlineKeyboardButton("💬 Help & Support", callback_data="help")]
+    ])
+    
+    await message.reply_photo(photo=WELCOME_IMAGE, caption=text, reply_markup=buttons)
 
 @bot_app.on_message(filters.command("ping"))
 async def ping_cmd(client, message):
     start_time = time.time()
-    msg = await message.reply_text("Pinging...")
+    msg = await message.reply_text("Pinging Servers...")
     end_time = time.time()
     await msg.edit_text(f"🏓 **Pong!**\nServer Speed: `{round((end_time - start_time) * 1000)}ms`\nStatus: `Ultra Fast 🚀`")
 
@@ -179,49 +186,59 @@ async def media_handler(client, message):
         return await message.reply_text("🔴 ERROR: Backend not configured. (Check ENV Variables)")
 
     try:
-        processing_msg = await message.reply_text("⏳ `Processing your Ultra HD File...`")
+        processing_msg = await message.reply_text("⏳ `Extracting Thumbnail & Generating Link...`")
         
         media = message.video or message.document or message.audio
         if not media: 
             await processing_msg.edit_text("❌ No valid media found.")
             return
             
-        # Safe file name
-        try:
-            file_name = getattr(media, "file_name", "PlayBox_Video.mp4")
-            if not file_name: file_name = "PlayBox_Video.mp4"
-        except Exception:
-            file_name = "PlayBox_Video.mp4"
+        file_name = getattr(media, "file_name", "PlayBox_Video.mp4")
+        if not file_name: file_name = "PlayBox_Video.mp4"
+        
+        size_mb = round(getattr(media, "file_size", 0) / (1024 * 1024), 2)
 
-        # 🚀 THE 2GB BYPASS TRICK: Use FORWARD instead of COPY
+        # 🚀 FORWARD TO LOG CHANNEL
         try:
-            # Chhota sa delay taaki Telegram file upload process poora kar le
-            await asyncio.sleep(1) 
-            # Forward karne se bot pe 0% load padta hai
             forwarded_msg = await message.forward(chat_id=LOG_CHANNEL)
         except Exception as e:
             await processing_msg.edit_text(f"❌ ERROR sending to Log Channel: {e}")
             return
 
         watch_link = f"{PUBLIC_URL}/watch/{LOG_CHANNEL}/{forwarded_msg.id}"
+        stream_direct = f"{PUBLIC_URL}/stream/{LOG_CHANNEL}/{forwarded_msg.id}"
 
-        # 🚀 THE TERABOX STYLE BLUE LINK FORMAT 🚀
-        text = f"[{watch_link}]({watch_link})\n\n"
-        text += f"**playbox.app**\n"
-        text += f"**{file_name}** - Shared via PlayBox\n\n"
-        text += f"PlayBox offers Ultra HD Ad-Free video streaming. Download the app for secure storage and file sharing anytime, anywhere."
+        # 🚀 DISKWALA STYLE TEXT FORMAT
+        text = f"**{file_name}**\n"
+        text += f"💾 **Size:** `{size_mb} MB`\n\n"
+        text += f"🔗 **PlayBox Link:**\n[{watch_link}]({watch_link})\n\n"
+        text += f"PlayBox offers up to 1024GB of free cloud storage. Download the app for secure storage and file sharing anytime, anywhere."
+
+        buttons = InlineKeyboardMarkup([
+            [InlineKeyboardButton("▶️ Watch in PlayBox", url=watch_link)],
+            [InlineKeyboardButton("📥 Download File", url=stream_direct)]
+        ])
+
+        # 🚀 THUMBNAIL EXTRACTION LOGIC
+        thumb_path = None
+        if hasattr(media, "thumbs") and media.thumbs:
+            # Download the thumbnail temporarily
+            thumb_path = await bot_app.download_media(media.thumbs[0].file_id)
 
         await processing_msg.delete()
-        await message.reply_text(
-            text, 
-            disable_web_page_preview=False, 
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("▶️ Watch Online", url=watch_link)]])
-        )
+        
+        if thumb_path:
+            # Send Photo with caption
+            await message.reply_photo(photo=thumb_path, caption=text, reply_markup=buttons)
+            os.remove(thumb_path) # Delete from server to save space
+        else:
+            # If no thumb, send normal text
+            await message.reply_text(text, disable_web_page_preview=False, reply_markup=buttons)
+
     except Exception as e:
         logger.error(f"Error: {e}")
         await message.reply_text(f"😥 Error generating link: {e}")
 
-# --- RUNNER ---
 async def start_services():
     app_runner = web.AppRunner(web.Application(client_max_size=1024**3))
     app_runner.app.add_routes(routes)
